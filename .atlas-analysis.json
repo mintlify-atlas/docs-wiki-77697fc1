@@ -1,0 +1,178 @@
+{
+  "projectType": "framework",
+  "projectName": "ABP Framework",
+  "projectDescription": "An opinionated, modular ASP.NET Core framework that provides foundational infrastructure, cross-cutting concerns, application modules, startup templates, and UI themes for building enterprise .NET web applications.",
+  "theme": "maple",
+  "primaryColor": "#ba4395",
+  "lightColor": "#ffffff",
+  "darkColor": null,
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Framework",
+        "groups": [
+          {
+            "group": "Overview",
+            "pages": [
+              "introduction",
+              "architecture-overview"
+            ]
+          },
+          {
+            "group": "Module System",
+            "pages": [
+              "module-system/abp-module",
+              "module-system/dependency-injection",
+              "module-system/application-lifecycle"
+            ]
+          },
+          {
+            "group": "DDD Building Blocks",
+            "pages": [
+              "ddd/entities-and-aggregates",
+              "ddd/repositories",
+              "ddd/domain-services",
+              "ddd/application-services",
+              "ddd/unit-of-work"
+            ]
+          },
+          {
+            "group": "Data Layer",
+            "pages": [
+              "data/entity-framework-core",
+              "data/mongodb",
+              "data/data-filtering",
+              "data/specifications"
+            ]
+          },
+          {
+            "group": "Cross-Cutting Concerns",
+            "pages": [
+              "cross-cutting/authorization-permissions",
+              "cross-cutting/auditing",
+              "cross-cutting/localization",
+              "cross-cutting/caching",
+              "cross-cutting/exception-handling",
+              "cross-cutting/validation",
+              "cross-cutting/settings",
+              "cross-cutting/features"
+            ]
+          },
+          {
+            "group": "Infrastructure",
+            "pages": [
+              "infrastructure/event-bus",
+              "infrastructure/background-jobs",
+              "infrastructure/blob-storing",
+              "infrastructure/multi-tenancy",
+              "infrastructure/virtual-file-system",
+              "infrastructure/text-templating"
+            ]
+          },
+          {
+            "group": "ASP.NET Core Integration",
+            "pages": [
+              "aspnetcore/mvc-controllers",
+              "aspnetcore/http-client-proxies",
+              "aspnetcore/bundling-minification",
+              "aspnetcore/ui-themes"
+            ]
+          },
+          {
+            "group": "Application Modules",
+            "pages": [
+              "modules/identity",
+              "modules/account",
+              "modules/openiddict",
+              "modules/tenant-management",
+              "modules/cms-kit",
+              "modules/audit-logging"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "Frontend",
+        "groups": [
+          {
+            "group": "Angular Packages",
+            "pages": [
+              "angular/ng-core",
+              "angular/ng-modules"
+            ]
+          },
+          {
+            "group": "MVC UI & Assets",
+            "pages": [
+              "mvc-ui/npm-packs",
+              "mvc-ui/theming-system"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "Tooling",
+        "groups": [
+          {
+            "group": "CLI & Templates",
+            "pages": [
+              "tooling/abp-cli",
+              "tooling/startup-templates"
+            ]
+          },
+          {
+            "group": "Build & Configuration",
+            "pages": [
+              "tooling/build-system",
+              "tooling/configuration"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "Module System with typed DependsOn dependency graph and lifecycle hooks (PreConfigureServices, ConfigureServices, PostConfigureServices, OnApplicationInitialization)",
+    "DDD Building Blocks: Entity, AggregateRoot, IRepository, DomainService, ApplicationService with full auditing hierarchies",
+    "Unit of Work (IUnitOfWork, IUnitOfWorkManager) with ambient UoW, transaction APIs, and database APIs",
+    "Entity Framework Core integration: AbpDbContext, EfCoreRepository, global data filters, change trackers",
+    "MongoDB integration: AbpMongoDbContext, MongoDbRepository, BSON serializers, client factory",
+    "Distributed Event Bus with Inbox/Outbox pattern, RabbitMQ/Kafka/Azure Service Bus providers",
+    "Background Jobs system with pluggable IBackgroundJobStore, Hangfire and Quartz integrations",
+    "Multi-Tenancy: TenantResolver, ICurrentTenant, contributor-based resolution, per-tenant connection strings",
+    "Authorization & Permissions: PermissionDefinitionManager, PermissionChecker, dynamic permission store, method-invocation interceptor",
+    "Distributed Caching (IDistributedCache<T>) and Hybrid Cache layer",
+    "BLOB Storing abstraction with BlobContainer, BlobProvider, Azure/AWS/database providers",
+    "Localization system with AbpStringLocalizerFactory, inherited resource types, external localization store",
+    "Virtual File System for embedding static resources across modules",
+    "HTTP Client Proxies (ClientProxyBase) for consuming remote ABP services",
+    "Conventional Controllers: auto-expose application services as REST API endpoints",
+    "Angular front-end packages (@abp/ng.core, @abp/ng.account, @abp/ng.identity, @abp/ng.oauth, etc.)",
+    "MVC npm packs for server-rendered UI (Bootstrap, jQuery, SignalR, DataTables bundled via ABP bundling system)",
+    "Pre-built application modules: Identity, Account, OpenIddict, TenantManagement, CmsKit, AuditLogging",
+    "ABP CLI with project creation, code generation, proxy generation, and build orchestration",
+    "Startup templates for app (Angular/MVC/Blazor), module, console, MAUI, and WPF",
+    "Text Templating (Scriban/Razor engines) for dynamic content generation",
+    "AI integration abstractions (Volo.Abp.AI, Volo.Abp.AI.Abstractions)"
+  ],
+  "publicApiSurface": [
+    "AbpModule (framework/src/Volo.Abp.Core) — base class for all modules",
+    "IAbpApplication / AbpApplicationFactory — application bootstrapper",
+    "IRepository<TEntity, TKey>, IBasicRepository<TEntity> (framework/src/Volo.Abp.Ddd.Domain)",
+    "AggregateRoot<TKey>, Entity<TKey> (framework/src/Volo.Abp.Ddd.Domain/Volo/Abp/Domain/Entities)",
+    "ApplicationService (framework/src/Volo.Abp.Ddd.Application/Volo/Abp/Application/Services)",
+    "IUnitOfWork, IUnitOfWorkManager (framework/src/Volo.Abp.Uow)",
+    "AbpDbContext<TDbContext> (framework/src/Volo.Abp.EntityFrameworkCore)",
+    "AbpMongoDbContext (framework/src/Volo.Abp.MongoDB)",
+    "ILocalEventBus, IDistributedEventBus (framework/src/Volo.Abp.EventBus)",
+    "IBackgroundJobManager, IBackgroundJob<TArgs> (framework/src/Volo.Abp.BackgroundJobs)",
+    "ICurrentTenant, TenantResolver (framework/src/Volo.Abp.MultiTenancy)",
+    "IPermissionChecker, PermissionDefinitionManager (framework/src/Volo.Abp.Authorization)",
+    "IDistributedCache<TCacheItem> (framework/src/Volo.Abp.Caching)",
+    "IBlobContainer<TContainer>, IBlobProvider (framework/src/Volo.Abp.BlobStoring)",
+    "AbpAspNetCoreMvcModule (framework/src/Volo.Abp.AspNetCore.Mvc)",
+    "ClientProxyBase (framework/src/Volo.Abp.Http.Client)",
+    "@abp/ng.core (npm/ng-packs/packages/core)",
+    "AbpCli — Volo.Abp.Cli (framework/src/Volo.Abp.Cli)"
+  ]
+}

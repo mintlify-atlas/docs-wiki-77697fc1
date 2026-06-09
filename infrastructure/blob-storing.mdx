@@ -1,0 +1,370 @@
+---
+title: "Blob Storing: Provider-Agnostic Binary File Storage"
+sidebarTitle: "Blob Storing"
+description: "How ABP's IBlobContainer, BlobContainerConfiguration, and pluggable IBlobProvider abstractions let you swap storage backends without changing application code."
+---
+
+ABP Blob Storing provides a unified API for saving, retrieving, checking, and deleting arbitrary binary content — images, documents, exports, and any other large object. The entire surface is `IBlobContainer`, which is backed by a swappable `IBlobProvider`. Switching from local disk to Azure Blob Storage or AWS S3 requires only configuration changes; none of your business code has to change.
+
+<CardGroup cols={2}>
+  <Card title="IBlobContainer&lt;TContainer&gt;" icon="box">
+    Strongly-typed container. Inject it with a marker class to distinguish storage areas (e.g., profile photos vs. reports).
+  </Card>
+  <Card title="IBlobProvider" icon="plug">
+    Pluggable storage back-end. Implement one to add custom storage (FTP, GCS, SharePoint, etc.).
+  </Card>
+  <Card title="BlobContainerConfiguration" icon="sliders">
+    Per-container settings: provider type, multi-tenancy, naming normalizers. Inherits from the default config as a fallback.
+  </Card>
+  <Card title="AbpBlobStoringOptions" icon="gear">
+    Central options class. Configure providers and container-level overrides via `Containers.Configure<T>()`.
+  </Card>
+</CardGroup>
+
+## Core Interfaces
+
+### `IBlobContainer`
+
+```csharp
+// framework/src/Volo.Abp.BlobStoring/Volo/Abp/BlobStoring/IBlobContainer.cs
+
+public interface IBlobContainer
+{
+    Task SaveAsync(
+        string name,
+        Stream stream,
+        bool overrideExisting = false,
+        CancellationToken cancellationToken = default);
+
+    Task<bool> DeleteAsync(
+        string name,
+        CancellationToken cancellationToken = default);
+
+    Task<bool> ExistsAsync(
+        string name,
+        CancellationToken cancellationToken = default);
+
+    // Throws if not found
+    Task<Stream> GetAsync(
+        string name,
+        CancellationToken cancellationToken = default);
+
+    // Returns null if not found
+    Task<Stream?> GetOrNullAsync(
+        string name,
+        CancellationToken cancellationToken = default);
+}
+
+// Typed variant — same API, resolved by container name derived from TContainer
+public interface IBlobContainer<TContainer> : IBlobContainer
+    where TContainer : class { }
+```
+
+### `BlobContainer<TContainer>` Implementation
+
+```csharp
+// framework/src/Volo.Abp.BlobStoring/Volo/Abp/BlobStoring/BlobContainer.cs
+
+public class BlobContainer<TContainer> : IBlobContainer<TContainer>
+    where TContainer : class
+{
+    protected readonly IBlobContainer Container;
+
+    public BlobContainer(IBlobContainerFactory blobContainerFactory)
+    {
+        Container = blobContainerFactory.Create<TContainer>();
+    }
+
+    public Task SaveAsync(string name, Stream stream,
+        bool overrideExisting = false,
+        CancellationToken cancellationToken = default)
+        => Container.SaveAsync(name, stream, overrideExisting, cancellationToken);
+
+    public Task<Stream> GetAsync(
+        string name, CancellationToken cancellationToken = default)
+        => Container.GetAsync(name, cancellationToken);
+
+    // ... DeleteAsync, ExistsAsync, GetOrNullAsync
+}
+```
+
+## Defining Containers
+
+### Typed container (recommended)
+
+Use a plain marker class (or interface) decorated with `[BlobContainerName]` to define a named container:
+
+```csharp
+[BlobContainerName("profile-pictures")]
+public class ProfilePictureContainer { }
+
+[BlobContainerName("invoice-pdfs")]
+public class InvoicePdfContainer { }
+```
+
+If `[BlobContainerName]` is omitted, ABP uses the fully-qualified type name as the container name.
+
+### Injecting and using a container
+
+```csharp
+public class ProfilePictureService : ITransientDependency
+{
+    private readonly IBlobContainer<ProfilePictureContainer> _pictureContainer;
+
+    public ProfilePictureService(
+        IBlobContainer<ProfilePictureContainer> pictureContainer)
+    {
+        _pictureContainer = pictureContainer;
+    }
+
+    public async Task UploadAsync(Guid userId, Stream imageStream)
+    {
+        await _pictureContainer.SaveAsync(
+            name: userId.ToString(),
+            stream: imageStream,
+            overrideExisting: true
+        );
+    }
+
+    public Task<Stream> GetAsync(Guid userId)
+        => _pictureContainer.GetAsync(userId.ToString());
+
+    public async Task DeleteAsync(Guid userId)
+        => await _pictureContainer.DeleteAsync(userId.ToString());
+}
+```
+
+## `BlobContainerConfiguration`
+
+Each container has a `BlobContainerConfiguration` instance that holds provider type, multi-tenancy flag, and naming normalizers. A container-specific config inherits any unconfigured value from the default config (fallback chain):
+
+```csharp
+// framework/src/Volo.Abp.BlobStoring/Volo/Abp/BlobStoring/BlobContainerConfiguration.cs
+
+public class BlobContainerConfiguration
+{
+    public Type? ProviderType { get; set; }
+
+    // false → container is shared across all tenants
+    public bool IsMultiTenant { get; set; } = true;
+
+    public ITypeList<IBlobNamingNormalizer> NamingNormalizers { get; }
+
+    public T? GetConfigurationOrDefault<T>(string name, T? defaultValue = default);
+    public BlobContainerConfiguration SetConfiguration(string name, object? value);
+}
+```
+
+## `AbpBlobStoringOptions` — Configuring Providers
+
+Configure providers inside `ConfigureServices`:
+
+```csharp
+// framework/src/Volo.Abp.BlobStoring/Volo/Abp/BlobStoring/AbpBlobStoringOptions.cs
+
+Configure<AbpBlobStoringOptions>(options =>
+{
+    // Default provider for all containers
+    options.Containers.ConfigureDefault(container =>
+    {
+        container.UseFileSystem(fileSystem =>
+        {
+            fileSystem.BasePath = "C:/MyApp/blobs";
+        });
+    });
+
+    // Override for a specific container
+    options.Containers.Configure<ProfilePictureContainer>(container =>
+    {
+        container.UseAzure(azure =>
+        {
+            azure.ConnectionString = "UseDevelopmentStorage=true";
+            azure.ContainerName = "profile-pictures";
+            azure.CreateContainerIfNotExists = true;
+        });
+    });
+
+    // All containers that are shared across tenants
+    options.Containers.Configure<InvoicePdfContainer>(container =>
+    {
+        container.IsMultiTenant = false;
+        container.UseFileSystem(fs => { fs.BasePath = "/shared/invoices"; });
+    });
+});
+```
+
+## `BlobProviderSaveArgs` and `BlobProviderGetArgs`
+
+Provider implementations receive strongly-typed args objects that carry the container name, blob name, configuration, and the stream or cancellation token:
+
+```csharp
+// framework/src/Volo.Abp.BlobStoring/Volo/Abp/BlobStoring/BlobProviderSaveArgs.cs
+
+public class BlobProviderSaveArgs : BlobProviderArgs
+{
+    public Stream BlobStream { get; }
+    public bool OverrideExisting { get; }
+}
+
+// BlobProviderGetArgs, BlobProviderDeleteArgs, BlobProviderExistsArgs
+// all extend BlobProviderArgs with: ContainerName, Configuration, BlobName, CancellationToken
+```
+
+## Implementing a Custom Provider
+
+Extend `BlobProviderBase` to create a custom back-end:
+
+```csharp
+public class MyCustomBlobProvider : BlobProviderBase, ITransientDependency
+{
+    public override async Task SaveAsync(BlobProviderSaveArgs args)
+    {
+        var blobName = args.BlobName; // normalised name
+        // persist args.BlobStream to your storage
+    }
+
+    public override async Task<Stream?> GetOrNullAsync(BlobProviderGetArgs args)
+    {
+        // return Stream or null
+    }
+
+    public override async Task<bool> DeleteAsync(BlobProviderDeleteArgs args)
+    {
+        // delete and return true if existed
+    }
+
+    public override async Task<bool> ExistsAsync(BlobProviderExistsArgs args)
+    {
+        // return true if exists
+    }
+}
+```
+
+Register it:
+
+```csharp
+options.Containers.ConfigureDefault(container =>
+{
+    container.ProviderType = typeof(MyCustomBlobProvider);
+});
+```
+
+## Available Providers
+
+<Tabs>
+  <Tab title="File System">
+    ```bash
+    dotnet add package Volo.Abp.BlobStoring.FileSystem
+    ```
+
+    ```csharp
+    container.UseFileSystem(fileSystem =>
+    {
+        fileSystem.BasePath = "/var/app/blobs";
+    });
+    ```
+
+    Files are stored as `{BasePath}/{tenantId}/{containerName}/{blobName}` (tenant prefix added when `IsMultiTenant = true`).
+  </Tab>
+  <Tab title="Azure Blob Storage">
+    ```bash
+    dotnet add package Volo.Abp.BlobStoring.Azure
+    ```
+
+    ```csharp
+    container.UseAzure(azure =>
+    {
+        azure.ConnectionString = Environment.GetEnvironmentVariable("AZURE_BLOB_CS");
+        azure.ContainerName = "my-container";
+        azure.CreateContainerIfNotExists = true;
+    });
+    ```
+  </Tab>
+  <Tab title="AWS S3">
+    ```bash
+    dotnet add package Volo.Abp.BlobStoring.Aws
+    ```
+
+    ```csharp
+    container.UseAws(aws =>
+    {
+        aws.AccessKeyId = "...";
+        aws.SecretAccessKey = "...";
+        aws.BucketName = "my-bucket";
+        aws.Region = "us-east-1";
+    });
+    ```
+  </Tab>
+  <Tab title="Database">
+    Stores blob bytes directly in your application database. Useful for smaller files or environments without external storage.
+
+    ```bash
+    dotnet add package Volo.Abp.BlobStoring.Database
+    ```
+
+    ```csharp
+    [DependsOn(typeof(BlobStoringDatabaseModule))]
+    public class MyModule : AbpModule { }
+
+    container.UseDatabase();
+    ```
+  </Tab>
+  <Tab title="Minio">
+    ```bash
+    dotnet add package Volo.Abp.BlobStoring.Minio
+    ```
+
+    ```csharp
+    container.UseMinio(minio =>
+    {
+        minio.EndPoint = "localhost:9000";
+        minio.AccessKey = "minioadmin";
+        minio.SecretKey = "minioadmin";
+        minio.BucketName = "my-bucket";
+    });
+    ```
+  </Tab>
+</Tabs>
+
+## Blob Naming and Normalisation
+
+`BlobNormalizeNaming` converts the raw blob name and container name into a provider-safe format. Normalizers are applied in order and are configurable per container:
+
+```csharp
+// Add a normalizer that lower-cases all blob names
+options.Containers.Configure<ProfilePictureContainer>(container =>
+{
+    container.NamingNormalizers.TryAdd<MyLowerCaseBlobNamingNormalizer>();
+});
+```
+
+<Note>
+When `IsMultiTenant = true` (the default), the current tenant ID is automatically prepended to the blob path by the provider, keeping tenant data isolated at the storage level.
+</Note>
+
+## Multi-Tenancy Considerations
+
+<Accordion title="Tenant-isolated containers (default)">
+When `BlobContainerConfiguration.IsMultiTenant = true`, blobs are namespaced under the current tenant's ID. Tenant A cannot access Tenant B's blobs through the ABP container API.
+</Accordion>
+
+<Accordion title="Shared containers">
+Set `IsMultiTenant = false` for containers that store data accessible by all tenants or by the host:
+
+```csharp
+options.Containers.Configure<SharedAssetsContainer>(container =>
+{
+    container.IsMultiTenant = false;
+});
+```
+</Accordion>
+
+<Warning>
+Using `GetOrNullAsync` rather than `GetAsync` avoids exceptions when a blob may not exist. Reserve `GetAsync` for scenarios where absence is a programming error.
+</Warning>
+
+## Related Pages
+
+- [Multi-Tenancy](/infrastructure/multi-tenancy) — controls how tenant ID prefixes are applied to blob paths
+- [Virtual File System](/infrastructure/virtual-file-system) — serves static embedded assets; distinct from runtime blob storage
+- [Background Jobs](/infrastructure/background-jobs) — commonly used to process uploaded blobs asynchronously

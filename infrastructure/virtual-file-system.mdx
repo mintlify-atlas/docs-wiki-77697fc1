@@ -1,0 +1,250 @@
+---
+title: "Virtual File System: Embedded and Physical File Abstraction"
+sidebarTitle: "Virtual File System"
+description: "How ABP's IVirtualFileProvider unifies embedded assembly resources and physical disk files into a single composable file tree for modules and themes."
+---
+
+ABP's Virtual File System (VFS) lets any module ship static files — Razor views, CSS, JavaScript, JSON seed data, templates — as embedded assembly resources. The host application (or another module) can then override individual files at any layer without forking the original library. Internally, VFS composes multiple `IFileProvider` instances into a priority-ordered `CompositeFileProvider` that is surfaced through `IVirtualFileProvider`.
+
+<CardGroup cols={2}>
+  <Card title="IVirtualFileProvider" icon="folder-tree">
+    Extends Microsoft's IFileProvider. Single entry point for GetFileInfo, GetDirectoryContents, and Watch across all registered file sets.
+  </Card>
+  <Card title="VirtualFileSetList" icon="layer-group">
+    Ordered list of VirtualFileSetInfo entries. Later entries (higher index) have lower priority — earlier entries win on name conflicts.
+  </Card>
+  <Card title="AddEmbedded&lt;T&gt;()" icon="box-archive">
+    Registers all assembly manifest resources for the assembly containing T as a virtual file set.
+  </Card>
+  <Card title="AddPhysical() / ReplaceEmbeddedByPhysical&lt;T&gt;()" icon="hard-drive">
+    Mounts a physical directory into the VFS, overriding embedded files at development time.
+  </Card>
+</CardGroup>
+
+## How It Works
+
+```mermaid
+flowchart LR
+    A[IVirtualFileProvider] --> B[CompositeFileProvider]
+    B --> C[DynamicFileProvider\n(runtime overrides)]
+    B --> D[PhysicalFileProvider\n(dev overrides)]
+    B --> E[ManifestEmbeddedFileProvider\n(module A assembly)]
+    B --> F[AbpEmbeddedFileProvider\n(module B assembly)]
+
+    style C fill:#e8f4f8
+    style D fill:#fff3cd
+    style E fill:#d4edda
+    style F fill:#d4edda
+```
+
+`VirtualFileProvider` builds the composite on startup. File sets are added in reverse order so that the **last-registered** set (typically the host application) wins over earlier modules:
+
+```csharp
+// framework/src/Volo.Abp.VirtualFileSystem/Volo/Abp/VirtualFileSystem/VirtualFileProvider.cs
+
+protected virtual IFileProvider CreateHybridProvider(IDynamicFileProvider dynamicFileProvider)
+{
+    var fileProviders = new List<IFileProvider>();
+    fileProviders.Add(dynamicFileProvider); // highest priority
+
+    // Reverse iteration: last-registered set has highest priority
+    foreach (var fileSet in _options.FileSets.AsEnumerable().Reverse())
+    {
+        fileProviders.Add(fileSet.FileProvider);
+    }
+
+    return new CompositeFileProvider(fileProviders);
+}
+```
+
+## Registering File Sets
+
+### Embedding files in a module assembly
+
+1. Mark files as `EmbeddedResource` in your `.csproj`:
+
+```xml
+<ItemGroup>
+  <EmbeddedResource Include="wwwroot/**" />
+  <EmbeddedResource Include="Pages/**/*.cshtml" />
+</ItemGroup>
+```
+
+2. Call `AddEmbedded<T>()` in your module's `ConfigureServices`:
+
+```csharp
+// framework/src/Volo.Abp.VirtualFileSystem/Volo/Abp/VirtualFileSystem/VirtualFileSetListExtensions.cs
+
+public override void ConfigureServices(ServiceConfigurationContext context)
+{
+    Configure<AbpVirtualFileSystemOptions>(options =>
+    {
+        // Register all embedded resources from the assembly that contains MyModule
+        options.FileSets.AddEmbedded<MyModule>();
+
+        // Optional: specify a base namespace and/or base folder to trim from paths
+        options.FileSets.AddEmbedded<MyModule>(
+            baseNamespace: "MyCompany.MyModule",
+            baseFolder: "/wwwroot"
+        );
+    });
+}
+```
+
+### `AbpVirtualFileSystemOptions`
+
+```csharp
+// framework/src/Volo.Abp.VirtualFileSystem/Volo/Abp/VirtualFileSystem/AbpVirtualFileSystemOptions.cs
+
+public class AbpVirtualFileSystemOptions
+{
+    public VirtualFileSetList FileSets { get; }
+}
+```
+
+`VirtualFileSetList` is simply a `List<VirtualFileSetInfo>` — iterate it, clear it, or insert at specific positions:
+
+```csharp
+// Insert host files before all module files (highest priority)
+options.FileSets.Insert(0, new PhysicalVirtualFileSetInfo(
+    new PhysicalFileProvider(env.ContentRootPath), env.ContentRootPath));
+```
+
+## Overriding Embedded Files (Development Mode)
+
+During development, you want live edits to a module's files without rebuilding the assembly. `ReplaceEmbeddedByPhysical<T>()` swaps the embedded provider for a physical one pointing at the source folder:
+
+```csharp
+// In your host application's module
+public override void ConfigureServices(ServiceConfigurationContext context)
+{
+    var hostingEnvironment = context.Services.GetHostingEnvironment();
+
+    if (hostingEnvironment.IsDevelopment())
+    {
+        Configure<AbpVirtualFileSystemOptions>(options =>
+        {
+            // Replace MyModule's embedded resources with live disk files
+            options.FileSets.ReplaceEmbeddedByPhysical<MyModule>(
+                Path.Combine(
+                    hostingEnvironment.ContentRootPath,
+                    "..\\..\\src\\MyCompany.MyModule"
+                )
+            );
+        });
+    }
+}
+```
+
+`ReplaceEmbeddedByPhysical<T>()` implementation:
+
+```csharp
+// framework/src/Volo.Abp.VirtualFileSystem/Volo/Abp/VirtualFileSystem/VirtualFileSetListExtensions.cs
+
+public static void ReplaceEmbeddedByPhysical<T>(
+    this VirtualFileSetList fileSets,
+    string physicalPath,
+    ExclusionFilters exclusionFilters = ExclusionFilters.Sensitive)
+{
+    var assembly = typeof(T).Assembly;
+
+    for (var i = 0; i < fileSets.Count; i++)
+    {
+        if (fileSets[i] is EmbeddedVirtualFileSetInfo embedded &&
+            embedded.Assembly == assembly)
+        {
+            var path = physicalPath;
+            if (!embedded.BaseFolder.IsNullOrEmpty())
+                path = Path.Combine(path, embedded.BaseFolder!);
+
+            fileSets[i] = new PhysicalVirtualFileSetInfo(
+                new PhysicalFileProvider(path, exclusionFilters), path);
+        }
+    }
+}
+```
+
+## Reading Files at Runtime
+
+Inject `IVirtualFileProvider` anywhere you need to read virtual files:
+
+```csharp
+public class SeedDataReader : ITransientDependency
+{
+    private readonly IVirtualFileProvider _virtualFileProvider;
+
+    public SeedDataReader(IVirtualFileProvider virtualFileProvider)
+    {
+        _virtualFileProvider = virtualFileProvider;
+    }
+
+    public string ReadJsonSeed(string relativePath)
+    {
+        // e.g., relativePath = "/MyModule/seed-data/permissions.json"
+        var fileInfo = _virtualFileProvider.GetFileInfo(relativePath);
+
+        if (!fileInfo.Exists)
+            throw new FileNotFoundException($"Virtual file not found: {relativePath}");
+
+        using var stream = fileInfo.CreateReadStream();
+        using var reader = new StreamReader(stream);
+        return reader.ReadToEnd();
+    }
+
+    public IEnumerable<string> ListDirectory(string path)
+    {
+        var directory = _virtualFileProvider.GetDirectoryContents(path);
+        return directory.Select(f => f.Name);
+    }
+}
+```
+
+## `DynamicFileProvider` — Runtime Additions
+
+`IDynamicFileProvider` allows files to be added or removed at runtime without restarting the application. ABP uses it internally for features like Razor view compilation caching:
+
+```csharp
+public interface IDynamicFileProvider : IFileProvider
+{
+    void AddOrUpdate(IFileInfo fileInfo);
+    bool Delete(string filePath);
+}
+```
+
+## How ABP Themes Use VFS
+
+ABP's UI themes (e.g., LeptonX, Basic) ship their CSS, JavaScript, and layout Razor views as embedded resources. The framework serves them through ASP.NET Core's static files middleware by pointing `UseStaticFiles()` at `IVirtualFileProvider`:
+
+```csharp
+// Internally configured by AbpAspNetCoreMvcModule
+app.UseStaticFiles(new StaticFileOptions
+{
+    FileProvider = app.ApplicationServices
+        .GetRequiredService<IVirtualFileProvider>()
+});
+```
+
+This means a module's `/wwwroot/styles/theme.css` embedded in its assembly becomes available at `https://myapp/styles/theme.css` automatically, and the host can override it by placing a file of the same path in its own `wwwroot` directory.
+
+<Tip>
+When a theme's LESS/SCSS source is embedded, `ReplaceEmbeddedByPhysical` in development mode gives you hot-reload of styles without any extra build step. Point it at the theme's source directory and changes are picked up by the `Watch()` change-token mechanism.
+</Tip>
+
+## File Set Priority Summary
+
+| Registration order | Priority | Typical use |
+|--------------------|----------|-------------|
+| First registered | Lowest | Framework base modules (e.g., AbpUi) |
+| Middle | Medium | Application modules |
+| Last registered | Highest | Host application, overrides |
+| `DynamicFileProvider` | Always highest | Runtime-generated files |
+
+<Note>
+`IVirtualFileProvider` implements `IFileProvider` directly, so it is compatible with any ASP.NET Core API that accepts an `IFileProvider` — `IWebHostEnvironment.WebRootFileProvider`, `PhysicalFileProvider` wrappers, Razor's `IRazorFileProvider`, and so on.
+</Note>
+
+## Related Pages
+
+- [Text Templating](/infrastructure/text-templating) — template content files are located via VFS
+- [Blob Storing](/infrastructure/blob-storing) — runtime binary storage; complements VFS for user-uploaded content
+- [Background Jobs](/infrastructure/background-jobs) — seed-data readers backed by VFS are commonly called during startup jobs

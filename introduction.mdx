@@ -1,0 +1,94 @@
+---
+title: "ABP Framework: Codebase Introduction for Engineers"
+sidebarTitle: "Introduction"
+description: "Internal engineering overview of the ABP Framework codebase. Covers repo layout, core abstractions, package conventions, and how to orient yourself in the source."
+---
+
+ABP is an open-source, modular application framework for ASP.NET Core. Every concern — from dependency injection and DDD building blocks to auditing, multi-tenancy, and event messaging — is encapsulated in a typed `AbpModule` NuGet package. The framework ships at version **10.6.0-preview** across 177+ packages under the `Volo.Abp.*` namespace, along with pre-built application modules, startup templates, Angular front-end packages, and CLI tooling.
+
+## What This Wiki Covers
+
+This is an internal engineering reference organized by codebase subsystem. It is not a quickstart or product guide — it is a map of the source code intended for engineers and coding agents navigating the repository.
+
+<CardGroup cols={2}>
+  <Card title="Module System" icon="puzzle-piece" href="/module-system/abp-module">
+    The foundational extensibility primitive — `AbpModule`, `[DependsOn]`, and the three-phase lifecycle.
+  </Card>
+  <Card title="Architecture Overview" icon="sitemap" href="/architecture-overview">
+    How all subsystems connect: the full layered architecture and HTTP request lifecycle.
+  </Card>
+  <Card title="DDD Building Blocks" icon="layer-group" href="/ddd/entities-and-aggregates">
+    `Entity`, `AggregateRoot`, `IRepository`, `DomainService`, `ApplicationService`.
+  </Card>
+  <Card title="Data Layer" icon="database" href="/data/entity-framework-core">
+    EF Core and MongoDB integrations, data filters, and the Specification pattern.
+  </Card>
+  <Card title="Cross-Cutting Concerns" icon="shield-halved" href="/cross-cutting/authorization-permissions">
+    Authorization, auditing, localization, caching, validation, settings, features.
+  </Card>
+  <Card title="Infrastructure" icon="server" href="/infrastructure/event-bus">
+    Event bus, background jobs, BLOB storing, multi-tenancy, virtual file system.
+  </Card>
+  <Card title="Application Modules" icon="blocks" href="/modules/identity">
+    Pre-built modules: Identity, Account, OpenIddict, TenantManagement, CmsKit, AuditLogging.
+  </Card>
+  <Card title="Tooling" icon="terminal" href="/tooling/abp-cli">
+    ABP CLI, startup templates, build system, and configuration conventions.
+  </Card>
+</CardGroup>
+
+## Repository Layout
+
+```
+abp/
+├── framework/src/          # 177 NuGet packages (Volo.Abp.*)
+├── modules/                # Pre-built application modules
+├── templates/              # Startup project scaffolds
+├── npm/
+│   ├── ng-packs/           # Angular packages (@abp/ng.*)
+│   └── packs/              # MVC/Razor bundled JS/CSS assets
+├── build/                  # PowerShell build/test scripts
+├── tools/                  # Dev tooling (localization sync, changelog)
+└── source-code/            # Solution wrappers for commercial source packages
+```
+
+## Core Abstractions at a Glance
+
+| Abstraction | Package | Purpose |
+|-------------|---------|---------|
+| `AbpModule` | `Volo.Abp.Core` | Base class for every framework feature; carries `[DependsOn]` graph |
+| `Entity<TKey>` | `Volo.Abp.Ddd.Domain` | DDD entity with identity |
+| `AggregateRoot<TKey>` | `Volo.Abp.Ddd.Domain` | Aggregate root with domain event support |
+| `IRepository<T, TKey>` | `Volo.Abp.Ddd.Domain` | Generic repository interface |
+| `ApplicationService` | `Volo.Abp.Ddd.Application` | Base for application-layer services |
+| `IUnitOfWorkManager` | `Volo.Abp.Uow` | Transaction scope management |
+| `AbpDbContext<T>` | `Volo.Abp.EntityFrameworkCore` | EF Core DbContext with ABP conventions |
+| `ILocalEventBus` | `Volo.Abp.EventBus` | In-process pub/sub |
+| `IDistributedEventBus` | `Volo.Abp.EventBus` | Cross-service pub/sub with Inbox/Outbox |
+| `ICurrentTenant` | `Volo.Abp.MultiTenancy` | Ambient tenant context |
+| `IPermissionChecker` | `Volo.Abp.Authorization` | Fine-grained permission checks |
+| `IDistributedCache<T>` | `Volo.Abp.Caching` | Multi-tenant aware distributed cache |
+
+## Package Naming Conventions
+
+ABP packages follow a consistent naming convention:
+
+- **`Volo.Abp.{Feature}`** — Core package for a subsystem
+- **`Volo.Abp.{Feature}.Abstractions`** — Interfaces/contracts only (no implementation)
+- **`Volo.Abp.{Feature}.Domain.Shared`** — Enums, consts, and localization keys shared across all layers
+- **`Volo.Abp.{Feature}.Domain`** — Domain entities, repositories interfaces, domain services
+- **`Volo.Abp.{Feature}.Application.Contracts`** — DTOs, application service interfaces, permissions
+- **`Volo.Abp.{Feature}.Application`** — Application service implementations
+- **`Volo.Abp.{Feature}.EntityFrameworkCore`** — EF Core repositories and DbContext
+- **`Volo.Abp.{Feature}.MongoDB`** — MongoDB repositories and context
+- **`Volo.Abp.{Feature}.HttpApi`** — Auto-generated API controllers
+- **`Volo.Abp.{Feature}.HttpApi.Client`** — HTTP client proxies for remote consumption
+- **`Volo.Abp.{Feature}.Web`** — Razor Pages UI
+
+## Where to Start
+
+<Note>
+Start with **[AbpModule](/module-system/abp-module)** — it is the single most important concept. Everything in ABP is a module with typed dependencies. Once you understand how modules declare dependencies and configure services, the rest of the framework follows logically.
+</Note>
+
+For a full architectural map, see the **[Architecture Overview](/architecture-overview)** page, which includes a component diagram, the HTTP request lifecycle sequence, and a description of how cross-cutting concerns are applied via dynamic proxies.

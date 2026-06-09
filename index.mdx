@@ -1,20 +1,138 @@
 ---
-title: "Introduction"
-description: "Welcome to your project"
+title: "ABP Framework: Internal Engineering Reference"
+sidebarTitle: "Home"
+description: "Internal codebase wiki for ABP — an opinionated modular ASP.NET Core framework. Navigate subsystems, module architecture, DDD building blocks, and infrastructure."
 ---
 
-Write a short description of your product here. What it does, who it's for, and what they can accomplish with it.
+ABP is a modular, opinionated application framework built on top of ASP.NET Core. It provides the foundational infrastructure — dependency injection, module lifecycle, DDD building blocks, data layer abstractions, cross-cutting concerns, and pre-built application modules — so teams can focus on business logic rather than plumbing. The framework is distributed as 177+ NuGet packages under the `Volo.Abp.*` namespace, each encapsulating a single cohesive concern.
 
-<Tip>
-  Ready to make this your own? Start by editing this page. Update your `docs.json` file to customize your site. Then fill out the [Quickstart](/quickstart) page.
-</Tip>
+## Architecture Overview
 
-<Card title="Quickstart" icon="rocket" href="/quickstart">
-  This card links to the quickstart page in your project.
-</Card>
-<Card title="Components" icon="puzzle-piece" href="https://mintlify.com/docs/components">
-  Add cards, callouts, steps, tabs, and more to design and structure your pages.
-</Card>
-<Card title="Settings" icon="gear" href="https://mintlify.com/docs/organize/settings">
-  Set your site name, branding, and navigation in the `docs.json` file.
-</Card>
+```mermaid
+graph TB
+    subgraph "Startup Templates"
+        T1[app template]
+        T2[module template]
+        T3[console/maui/wpf]
+    end
+
+    subgraph "Application Modules"
+        M1[Identity]
+        M2[Account]
+        M3[OpenIddict]
+        M4[TenantManagement]
+        M5[CmsKit]
+        M6[AuditLogging]
+    end
+
+    subgraph "ASP.NET Core Integration"
+        A1[AbpAspNetCoreMvcModule]
+        A2[Conventional Controllers]
+        A3[HTTP Client Proxies]
+        A4[Bundling & Minification]
+        A5[UI Themes]
+    end
+
+    subgraph "Framework Core"
+        F1[Module System\nAbpModule + DependsOn]
+        F2[DDD Building Blocks\nEntity / AggregateRoot\nRepository / DomainService\nApplicationService]
+        F3[Unit of Work\nIUnitOfWork / IUnitOfWorkManager]
+    end
+
+    subgraph "Data Layer"
+        D1[Entity Framework Core\nAbpDbContext / EfCoreRepository]
+        D2[MongoDB\nAbpMongoDbContext / MongoDbRepository]
+        D3[Data Filtering\nISoftDelete / IMultiTenant]
+        D4[Specifications]
+    end
+
+    subgraph "Cross-Cutting Concerns"
+        C1[Authorization & Permissions]
+        C2[Auditing]
+        C3[Localization]
+        C4[Caching]
+        C5[Exception Handling]
+        C6[Validation]
+        C7[Settings]
+        C8[Features & Global Features]
+    end
+
+    subgraph "Infrastructure"
+        I1[Event Bus\nLocal + Distributed]
+        I2[Background Jobs]
+        I3[BLOB Storing]
+        I4[Multi-Tenancy]
+        I5[Virtual File System]
+        I6[Text Templating]
+    end
+
+    subgraph "Frontend"
+        FE1[Angular Packages\n@abp/ng.*]
+        FE2[MVC npm Packs]
+    end
+
+    T1 & T2 & T3 --> A1
+    M1 & M2 & M3 & M4 & M5 & M6 --> F1
+    A1 --> F1
+    A2 & A3 & A4 & A5 --> A1
+    F1 --> F2 --> F3
+    F3 --> D1 & D2
+    D1 & D2 --> D3 & D4
+    F2 --> C1 & C2 & C3 & C4 & C5 & C6 & C7 & C8
+    F1 --> I1 & I2 & I3 & I4 & I5 & I6
+    A1 --> FE1 & FE2
+```
+
+## Subsystem Map
+
+<CardGroup cols={2}>
+  <Card title="Module System" icon="puzzle-piece" href="/module-system/abp-module">
+    `AbpModule` base class, `[DependsOn]` typed dependency graph, and the three-phase service configuration lifecycle.
+  </Card>
+  <Card title="DDD Building Blocks" icon="layer-group" href="/ddd/entities-and-aggregates">
+    `Entity`, `AggregateRoot`, `IRepository`, `DomainService`, `ApplicationService` — the core DDD abstractions and their auditing hierarchies.
+  </Card>
+  <Card title="Data Layer" icon="database" href="/data/entity-framework-core">
+    `AbpDbContext`, `EfCoreRepository`, `AbpMongoDbContext`, data filters (`ISoftDelete`, `IMultiTenant`), and the Specification pattern.
+  </Card>
+  <Card title="Cross-Cutting Concerns" icon="shield-halved" href="/cross-cutting/authorization-permissions">
+    Authorization, auditing, localization, caching, exception handling, validation, settings, and feature flags — all wired via interceptors.
+  </Card>
+  <Card title="Infrastructure" icon="server" href="/infrastructure/event-bus">
+    Distributed Event Bus (Inbox/Outbox), Background Jobs, BLOB Storing, Multi-Tenancy resolution, Virtual File System, and Text Templating.
+  </Card>
+  <Card title="ASP.NET Core Integration" icon="globe" href="/aspnetcore/mvc-controllers">
+    Conventional API controllers, dynamic HTTP client proxies, bundling/minification pipeline, and the UI theming contract.
+  </Card>
+  <Card title="Application Modules" icon="blocks" href="/modules/identity">
+    Pre-built modules: Identity, Account, OpenIddict, TenantManagement, CmsKit, AuditLogging — each a self-contained ABP module with its own DDD layers.
+  </Card>
+  <Card title="Angular Packages" icon="angular" href="/angular/ng-core">
+    `@abp/ng.core` and sibling Angular packages for authentication, identity, settings, feature management, and theming.
+  </Card>
+  <Card title="MVC UI & Assets" icon="palette" href="/mvc-ui/npm-packs">
+    Server-side MVC npm packs (Bootstrap, jQuery, DataTables, SignalR) and the Razor Pages theming system.
+  </Card>
+  <Card title="ABP CLI & Templates" icon="terminal" href="/tooling/abp-cli">
+    `abp` CLI commands, project scaffolding, proxy generation, and the startup template structure.
+  </Card>
+  <Card title="Build & Configuration" icon="gear" href="/tooling/build-system">
+    PowerShell build scripts, `common.props` / `Directory.Build.props`, NuGet versioning, and test configuration.
+  </Card>
+</CardGroup>
+
+## Where to Start
+
+If you are reading this cold, start with:
+
+1. **[Architecture Overview](/architecture-overview)** — how all subsystems fit together and the request lifecycle end-to-end.
+2. **[AbpModule](/module-system/abp-module)** — the central extensibility primitive. Everything in ABP is a module. Understanding `AbpModule` and `[DependsOn]` unlocks the entire codebase.
+3. **Key entry points:**
+   - `framework/src/Volo.Abp.Core/` — the ABP kernel: `AbpModule`, application bootstrapper, DI extensions, and core utilities.
+   - `framework/src/Volo.Abp.Ddd.Domain/` — DDD building blocks: `Entity`, `AggregateRoot`, `IRepository`, `DomainService`.
+   - `framework/src/Volo.Abp.AspNetCore.Mvc/Volo/Abp/AspNetCore/Mvc/AbpAspNetCoreMvcModule.cs` — the MVC integration hub.
+   - `modules/identity/src/` — a reference implementation of a full ABP application module with all DDD layers.
+
+<Note>
+This wiki documents the open-source ABP Framework at version **10.6.0-preview**. Source lives at `framework/` (core packages), `modules/` (application modules), `npm/` (JavaScript packages), and `templates/` (project scaffolds).
+</Note>

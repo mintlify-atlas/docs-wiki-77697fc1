@@ -1,0 +1,241 @@
+---
+title: "CMS Kit Module: Composable Content Building Blocks"
+sidebarTitle: "CMS Kit"
+description: "Pages, Blogs, Tags, Ratings, Comments, Reactions, Menus, MediaLibrary, MarkedItems — Global Feature flags, admin vs public split, and Angular support."
+---
+
+CMS Kit is a collection of independently-activatable content building blocks. Each feature is controlled by an ABP **Global Feature** flag, so an application only pays the migration and runtime cost for the components it actually uses. Features are split between an **admin** surface (content authoring, moderation) and a **public** surface (end-user display and interaction), each with its own application service layer, HTTP API, and Web UI packages.
+
+<CardGroup cols={3}>
+  <Card title="Pages" icon="file">
+    Slug-based CMS pages with a rich-text `Content` field
+  </Card>
+  <Card title="Blogs" icon="newspaper">
+    Multi-blog engine: `Blog`, `BlogPost`, per-blog feature flags
+  </Card>
+  <Card title="Comments" icon="comment">
+    Threaded comments attachable to any entity type
+  </Card>
+  <Card title="Reactions" icon="face-smile">
+    Emoji-style reactions (like, heart, etc.) on any entity type
+  </Card>
+  <Card title="Ratings" icon="star">
+    Star ratings (1-5) on any entity type
+  </Card>
+  <Card title="Tags" icon="tag">
+    Entity tagging system with popular-tag queries
+  </Card>
+  <Card title="Menus" icon="bars">
+    Dynamic navigation menus managed by administrators
+  </Card>
+  <Card title="Media Library" icon="image">
+    Blob-store-backed media uploads with descriptor metadata
+  </Card>
+  <Card title="Marked Items" icon="bookmark">
+    User-level bookmarks/favourites on any entity type
+  </Card>
+</CardGroup>
+
+## Package structure
+
+```
+modules/cms-kit/src/
+├── Volo.CmsKit.Domain.Shared            # Consts, Global Feature declarations, ETOs
+├── Volo.CmsKit.Domain                   # All domain entities and services (see below)
+├── Volo.CmsKit.Application.Contracts    # Combined admin+public service interfaces
+├── Volo.CmsKit.Application              # Combined application service implementations
+│
+├── Volo.CmsKit.Common.Application.Contracts  # Shared (cross-surface) contracts
+├── Volo.CmsKit.Common.Application            # Shared service implementations
+├── Volo.CmsKit.Common.HttpApi               # Shared REST controllers
+├── Volo.CmsKit.Common.HttpApi.Client        # Shared static proxies
+├── Volo.CmsKit.Common.Web                   # Shared Razor tag helpers / components
+│
+├── Volo.CmsKit.Admin.Application.Contracts  # Admin-only interfaces
+├── Volo.CmsKit.Admin.Application            # Admin service implementations
+├── Volo.CmsKit.Admin.HttpApi                # Admin REST controllers
+├── Volo.CmsKit.Admin.HttpApi.Client         # Admin static proxies
+├── Volo.CmsKit.Admin.Web                    # Admin Razor Pages UI
+│
+├── Volo.CmsKit.Public.Application.Contracts # Public-only interfaces
+├── Volo.CmsKit.Public.Application           # Public service implementations
+├── Volo.CmsKit.Public.HttpApi               # Public REST controllers
+├── Volo.CmsKit.Public.HttpApi.Client        # Public static proxies
+├── Volo.CmsKit.Public.Web                   # Public Razor Pages / tag helpers
+│
+├── Volo.CmsKit.HttpApi                      # Umbrella HttpApi (admin+public)
+├── Volo.CmsKit.HttpApi.Client               # Umbrella static proxies
+├── Volo.CmsKit.Web                          # Umbrella Web (admin+public UI)
+│
+├── Volo.CmsKit.EntityFrameworkCore         # EF Core DbContext, repositories
+└── Volo.CmsKit.MongoDB                     # MongoDB repositories
+```
+
+## Global Feature system
+
+CMS Kit features are **opt-in** at application startup. No feature contributes database migrations or service registrations unless it is explicitly enabled:
+
+```csharp
+// In the host module's ConfigureServices, BEFORE building the service provider:
+GlobalFeatureManager.Instance.Modules()
+    .CmsKit(kit =>
+    {
+        kit.Pages.Enable();
+        kit.Blogs.Enable();
+        kit.Comments.Enable();
+        kit.Reactions.Enable();
+        kit.Ratings.Enable();
+        kit.Tags.Enable();
+        kit.Menus.Enable();
+        kit.Media.Enable();
+        kit.MarkedItemsFeature.Enable();
+        kit.GlobalResources.Enable();
+    });
+```
+
+`GlobalCmsKitFeatures` is the type-safe accessor:
+
+```csharp
+// modules/cms-kit/src/Volo.CmsKit.Domain.Shared/.../GlobalCmsKitFeatures.cs
+public class GlobalCmsKitFeatures : GlobalModuleFeatures
+{
+    public const string ModuleName = "CmsKit";
+
+    public ReactionsFeature Reactions => GetFeature<ReactionsFeature>();
+    public CommentsFeature Comments   => GetFeature<CommentsFeature>();
+    public MediaFeature Media         => GetFeature<MediaFeature>();
+    public RatingsFeature Ratings     => GetFeature<RatingsFeature>();
+    public TagsFeature Tags           => GetFeature<TagsFeature>();
+    public PagesFeature Pages         => GetFeature<PagesFeature>();
+    public BlogsFeature Blogs         => GetFeature<BlogsFeature>();
+    public MenuFeature Menu           => GetFeature<MenuFeature>();
+    public GlobalResourcesFeature GlobalResources => GetFeature<GlobalResourcesFeature>();
+    public MarkedItemsFeature MarkedItemsFeature  => GetFeature<MarkedItemsFeature>();
+}
+```
+
+<Warning>
+`GlobalFeatureManager.Instance.Modules().CmsKit(...)` must be called before `IServiceCollection.BuildServiceProvider()` — typically in the module's static initialiser or very early in `ConfigureServices`. Features cannot be toggled at runtime.
+</Warning>
+
+## Domain entities by feature
+
+<Tabs>
+  <Tab title="Pages">
+    **Entity**: `Page` — `Slug` (unique URL key), `Title`, `Content` (HTML), `Script`, `Style`.
+
+    `PageManager` enforces slug uniqueness per tenant. `SlugNormalizer` converts display names to URL-safe slugs.
+
+    **Admin**: Create, update, delete pages, manage content.
+    **Public**: `IPagePublicAppService.FindBySlugAsync(string slug)`.
+  </Tab>
+  <Tab title="Blogs">
+    **Entities**:
+    - `Blog` — `Name`, `Slug` (unique per tenant)
+    - `BlogPost` — `BlogId`, `Title`, `Slug`, `ShortDescription`, `Content`, `CoverImageMediaId`, `Status` (`Draft`/`Published`)
+    - `BlogFeature` — per-blog toggle for Reactions, Rating, Comments
+
+    **Admin**: Full CRUD for blogs and posts.
+    **Public**: `GetListAsync` with filtering by tag, pagination.
+  </Tab>
+  <Tab title="Comments">
+    **Entity**: `Comment` — `EntityType` (string), `EntityId` (string), `Text`, `RepliedCommentId` (nullable, for threading).
+
+    Any entity type can receive comments by registering it:
+    ```csharp
+    Configure<CmsKitCommentOptions>(options =>
+    {
+        options.EntityTypes.AddIfNotContains(
+            new CommentEntityTypeDefinition("BlogPost"));
+    });
+    ```
+
+    **Admin**: List, delete (moderation).
+    **Public**: Create/update/delete own comments, list by entity.
+  </Tab>
+  <Tab title="Reactions">
+    **Entity**: `UserReaction` — `EntityType`, `EntityId`, `UserId`, `ReactionName` (e.g., `"ThumbsUp"`).
+
+    Register entity types and allowed reactions:
+    ```csharp
+    Configure<CmsKitReactionOptions>(options =>
+    {
+        options.EntityTypes.AddIfNotContains(
+            new ReactionEntityTypeDefinition("BlogPost",
+                reactions: new[]
+                {
+                    new ReactionDefinition(StandardReactions.ThumbsUp),
+                    new ReactionDefinition(StandardReactions.Heart)
+                }));
+    });
+    ```
+  </Tab>
+  <Tab title="Ratings">
+    **Entity**: `UserRating` — `EntityType`, `EntityId`, `UserId`, `StarCount` (1-5).
+
+    One rating per user per entity. `RatingManager.SetStarAsync` upserts.
+  </Tab>
+  <Tab title="Tags">
+    **Entities**: `Tag` — `EntityType`, `Name`. `EntityTag` — join between an entity instance and a `Tag`.
+
+    `TagManager` and `EntityTagManager` handle CRUD and ensure entity types are registered in `CmsKitTagOptions`.
+  </Tab>
+  <Tab title="Menus">
+    **Entity**: `MenuItem` — `DisplayName`, `Url`, `IsActive`, `ParentId`, `Order`, `CssClass`, `Icon`, `Target`, `ElementId`, `RequiredPermissionName`.
+
+    Admin CRUD; public `IMenuItemPublicAppService.GetListAsync()` returns the active menu tree.
+  </Tab>
+  <Tab title="Media">
+    **Entity**: `MediaDescriptor` — `EntityType`, `Name`, `MimeType`, `Size`. Content stored in ABP Blob Storing.
+
+    `MediaDescriptorManager` handles upload validation. `CmsKitMediaOptions.EntityTypes` defines allowed entity types and optional file-size/extension restrictions.
+  </Tab>
+</Tabs>
+
+## Admin vs Public split
+
+The admin/public split is a deliberate architectural choice:
+
+| Concern | Admin | Public |
+|---|---|---|
+| Authentication | Requires `CmsKit.Admin.*` permissions | Mostly anonymous or authenticated |
+| Mutations | Full CRUD | Create (comments, reactions) or read-only |
+| HTTP API prefix | `/api/cms-kit-admin/` | `/api/cms-kit/` |
+| Web UI | `/CmsKit/Pages`, `/CmsKit/BlogPosts`, etc. | Rendered inline in content pages |
+
+Consume only the packages you need. A pure SPA backend only needs `Admin.HttpApi` + `Public.HttpApi` without any Web packages.
+
+## CmsKitDomainModule dependencies
+
+```csharp
+// modules/cms-kit/src/Volo.CmsKit.Domain/Volo/CmsKit/CmsKitDomainModule.cs
+[DependsOn(
+    typeof(CmsKitDomainSharedModule),
+    typeof(AbpUsersDomainModule),
+    typeof(AbpDddDomainModule),
+    typeof(AbpBlobStoringModule),
+    typeof(AbpSettingManagementDomainModule)
+)]
+public class CmsKitDomainModule : AbpModule { ... }
+```
+
+`AbpBlobStoringModule` is required for the Media feature. `AbpSettingManagementDomainModule` provides per-tenant settings used by blog features.
+
+## Angular support
+
+CMS Kit ships Angular libraries (separate repo) with:
+
+- `@volo/abp.ng.cms-kit` — admin components
+- `@volo/abp.ng.cms-kit/public` — public widget components
+
+Components include `BlogPostListComponent`, `PageViewComponent`, `CommentComponent`, `ReactionComponent`, `RatingComponent`, `TagListComponent`, and `MenuComponent`. They communicate with the public HTTP API and require `CmsKitConfigModule` in the Angular app's root module.
+
+## Global Resources
+
+The `GlobalResource` feature allows injecting custom CSS and JavaScript snippets that are served on every page. Stored as database records, editable via the admin UI without a deployment.
+
+## See also
+
+- [UI Themes](../aspnetcore/ui-themes) — CMS Kit public pages use `StandardLayouts.Public`
+- [Audit Logging](./audit-logging) — CMS content changes are captured in audit logs
+- [Tenant Management](./tenant-management) — CMS Kit is fully multi-tenant aware

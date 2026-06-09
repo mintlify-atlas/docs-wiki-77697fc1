@@ -1,0 +1,218 @@
+---
+title: "Localization System: Resources, Languages, and Enum Support"
+sidebarTitle: "Localization"
+description: "ABP's localization layer: resource registration, JSON file structure, inheritance chains, IExternalLocalizationStore, AbpEnumLocalizer, and route-based culture switching."
+---
+
+ABP wraps ASP.NET Core's `IStringLocalizer` with its own factory and dictionary-based implementations to add resource inheritance, dynamic/external resource loading, enum localization, and a language registry. Localization resources are typically JSON files embedded in assemblies, but any contributor — including a database-backed `IExternalLocalizationStore` — can provide or override strings at runtime.
+
+<CardGroup cols={2}>
+  <Card title="AbpStringLocalizerFactory" icon="language">
+    Replaces the default ASP.NET Core factory; resolves localizers from ABP resource definitions with caching and inheritance support.
+  </Card>
+  <Card title="AbpDictionaryBasedStringLocalizer" icon="book-open">
+    Core `IStringLocalizer` implementation backed by a dictionary of `ILocalizationResourceContributor` instances.
+  </Card>
+  <Card title="AbpEnumLocalizer" icon="list-ol">
+    Translates enum member names using `Enum:{TypeName}.{Value}` convention keys from any registered localizer.
+  </Card>
+  <Card title="IExternalLocalizationStore" icon="database">
+    Extension point for loading localization resources from an external source such as a database at runtime.
+  </Card>
+</CardGroup>
+
+## Registering a Localization Resource
+
+Localization resources are C# marker classes. They are registered in `ConfigureServices` via `AbpLocalizationOptions`:
+
+```csharp
+// BookStoreResource.cs — marker class only
+[LocalizationResourceName("BookStore")]
+public class BookStoreResource { }
+
+// Module.cs — ConfigureServices
+Configure<AbpLocalizationOptions>(options =>
+{
+    options.Resources
+        .Add<BookStoreResource>("en")               // default culture
+        .AddBaseTypes(typeof(AbpValidationResource)) // inherit ABP validation strings
+        .AddVirtualJson("/Localization/BookStore");   // where JSON files live
+});
+```
+
+`AddBaseTypes` causes the localizer to fall back to the listed resource types when a key is not found in the current resource. This enables modules to extend or override each other's strings.
+
+### Language Registration
+
+```csharp
+Configure<AbpLocalizationOptions>(options =>
+{
+    options.Languages.Add(new LanguageInfo("en",    "en",    "English"));
+    options.Languages.Add(new LanguageInfo("tr",    "tr",    "Türkçe",   "tr"));
+    options.Languages.Add(new LanguageInfo("zh-Hans","zh-Hans","简体中文","zh-Hans"));
+});
+```
+
+`ILanguageProvider` returns this list; `DefaultLanguageProvider` serves the `options.Languages` collection as-is.
+
+## JSON Resource File Structure
+
+JSON files follow the `{CultureCode}.json` naming convention and live at the virtual path registered with `AddVirtualJson`:
+
+```json
+// Localization/BookStore/en.json
+{
+  "Culture": "en",
+  "Texts": {
+    "Menu:BookStore":         "Book Store",
+    "Menu:Books":             "Books",
+    "Permission:Books":       "Book Management",
+    "Permission:Books.Create":"Creating books",
+    "NewBook":                "New Book",
+    "BookName":               "Name",
+    "Enum:BookType.0":        "Undefined",
+    "Enum:BookType.1":        "Adventure"
+  }
+}
+```
+
+```json
+// Localization/BookStore/tr.json
+{
+  "Culture": "tr",
+  "Texts": {
+    "Menu:BookStore": "Kitap Mağazası",
+    "NewBook":        "Yeni Kitap"
+  }
+}
+```
+
+<Note>
+Any key not present in the current culture file is looked up in the resource's base cultures and base resource types before returning a non-translated `LocalizedString` with `ResourceNotFound = true`.
+</Note>
+
+## AbpStringLocalizerFactory
+
+`AbpStringLocalizerFactory` replaces ASP.NET Core's `ResourceManagerStringLocalizerFactory` for ABP-registered resource types. It maintains a `ConcurrentDictionary` cache keyed on the resource name:
+
+```csharp
+public class AbpStringLocalizerFactory : IStringLocalizerFactory
+{
+    // Resolves by Type (for [Inject] IStringLocalizer<BookStoreResource>)
+    public virtual IStringLocalizer Create(Type resourceType)
+    {
+        var resource = AbpLocalizationOptions.Resources.GetOrNull(resourceType);
+        if (resource == null)
+            return InnerFactory.Create(resourceType); // fall back to resx
+
+        return CreateInternal(resource.ResourceName, resource, lockCache: true);
+    }
+
+    // Resolves by resource name string (for dynamic/external resources)
+    public IStringLocalizer? CreateByResourceNameOrNull(string resourceName) { ... }
+}
+```
+
+For non-ABP resource types (plain resx), the call is delegated to the wrapped `ResourceManagerStringLocalizerFactory`.
+
+## AbpDictionaryBasedStringLocalizer
+
+`AbpDictionaryBasedStringLocalizer` implements `IAbpStringLocalizer` and chains through:
+
+1. Each `ILocalizationResourceContributor` in the resource (e.g. `JsonVirtualFileLocalizationResourceContributor`)
+2. The `IExternalLocalizationStore` for dynamic overrides
+3. All `BaseLocalizers` (from `AddBaseTypes`)
+
+```mermaid
+flowchart TD
+    A[localizer[key]] --> B{Current contributor\nhas key?}
+    B -- Yes --> C[Return LocalizedString]
+    B -- No --> D{ExternalLocalizationStore\nhas key?}
+    D -- Yes --> C
+    D -- No --> E{BaseLocalizers\nhave key?}
+    E -- Yes --> C
+    E -- No --> F[ResourceNotFound = true\nReturn key as value]
+```
+
+`TryToGetFromBaseCulture` (default `true`) means `zh-CN` falls back to `zh` before checking `DefaultResourceType`. `TryToGetFromDefaultCulture` falls back to the `DefaultResourceType` registered in options.
+
+## IExternalLocalizationStore
+
+Implement this interface to load resource definitions and localized strings from a database or remote API at runtime:
+
+```csharp
+public interface IExternalLocalizationStore
+{
+    LocalizationResourceBase?   GetResourceOrNull(string resourceName);
+    Task<LocalizationResourceBase?> GetResourceOrNullAsync(string resourceName);
+    Task<string[]>              GetResourceNamesAsync();
+    Task<LocalizationResourceBase[]> GetResourcesAsync();
+}
+```
+
+The default `NullExternalLocalizationStore` returns empty results. The ABP Language Management module provides a database-backed implementation.
+
+## AbpEnumLocalizer
+
+`AbpEnumLocalizer` translates enum values using a priority-ordered list of candidate keys:
+
+```csharp
+// Key lookup order for BookType.Adventure (value = 1):
+// 1. "Enum:BookType.1"
+// 2. "Enum:BookType.Adventure"
+// 3. "BookType.1"
+// 4. "BookType.Adventure"
+// 5. "Adventure"   (member name as fallback)
+
+// Usage:
+public class BookAppService : ApplicationService
+{
+    private readonly IAbpEnumLocalizer _enumLocalizer;
+
+    public string GetBookTypeName(BookType type)
+        => _enumLocalizer.GetString(typeof(BookType), type);
+}
+```
+
+`GetString` accepts optional `IStringLocalizer?[]` arguments to restrict the search to specific resources, useful when the same enum is used across multiple bounded contexts.
+
+## Route-Based Culture
+
+Register `UseRouteBasedCulture` in the ASP.NET Core middleware pipeline to derive the culture from the URL path segment (e.g. `/en/books`):
+
+```csharp
+// In Configure / UseEndpoints:
+app.UseAbpRequestLocalization();
+// Provides: query-string (?culture=tr), cookie, Accept-Language header, route
+
+// For route-based culture, add the route segment in endpoint configuration:
+app.UseRouting();
+app.UseAbpRequestLocalization();
+app.UseEndpoints(endpoints =>
+{
+    endpoints.MapControllerRoute(
+        name: "defaultWithCulture",
+        pattern: "{culture}/{controller=Home}/{action=Index}/{id?}");
+});
+```
+
+<Tip>
+Prefer the `?culture=` query string approach for API clients; use route segments for SEO-sensitive Razor Pages / MVC applications where the culture should appear in the URL.
+</Tip>
+
+## Localization Options Reference
+
+| Option | Type | Default | Purpose |
+|--------|------|---------|---------|
+| `DefaultResourceType` | `Type?` | `null` | Global fallback when no resource specified |
+| `Languages` | `List<LanguageInfo>` | `[]` | Registered UI languages |
+| `TryToGetFromBaseCulture` | `bool` | `true` | `zh-CN` → `zh` fallback |
+| `TryToGetFromDefaultCulture` | `bool` | `true` | Fall back to `DefaultResourceType` |
+| `GlobalContributors` | `ITypeList<ILocalizationResourceContributor>` | `[]` | Contributors applied to every resource |
+
+## Related Pages
+
+- [Exception Handling](./exception-handling) — `AbpExceptionLocalizationOptions` maps error codes to localizable messages
+- [Settings](./settings) — `SettingDefinition.DisplayName` uses `ILocalizableString`
+- [Authorization](./authorization-permissions) — permission `DisplayName` is also `ILocalizableString`
+- [Features](./features) — `FeatureDefinition.DisplayName` uses the same localization primitives

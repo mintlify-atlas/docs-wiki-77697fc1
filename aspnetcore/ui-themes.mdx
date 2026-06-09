@@ -1,0 +1,355 @@
+---
+title: "ABP UI Theming: Contract, Toolbars, and Basic Theme"
+sidebarTitle: "UI Themes"
+description: "ITheme, IThemeManager, PageToolbars, StandardBundles, and the Basic Theme packages for MVC, Blazor Server, WebAssembly, MAUI, and MudBlazor targets."
+---
+
+ABP's theming system is designed as a contract: the framework defines the interfaces and shared infrastructure (`ITheme`, `IThemeManager`, `PageToolbar`, `StandardBundles`), while concrete themes implement those contracts as separate NuGet packages. Application code is decoupled from the visual presentation layer and can swap themes by changing a single package reference.
+
+<CardGroup cols={2}>
+  <Card title="ITheme / IThemeManager" icon="palette">
+    Defines the layout resolution contract. `IThemeManager.CurrentTheme` is resolved per-request.
+  </Card>
+  <Card title="StandardBundles" icon="box">
+    `Global` style and script bundles that all themes and modules contribute to.
+  </Card>
+  <Card title="PageToolbars" icon="screwdriver-wrench">
+    Composable per-page action bars contributed by modules without coupling to layout.
+  </Card>
+  <Card title="Basic Theme" icon="brush">
+    Reference theme for MVC Razor, Blazor Server/WASM/MAUI, and MudBlazor variants.
+  </Card>
+</CardGroup>
+
+## Theming contract
+
+### ITheme
+
+```csharp
+// framework/src/Volo.Abp.AspNetCore.Mvc.UI/Volo/Abp/AspNetCore/Mvc/UI/Theming/ITheme.cs
+public interface ITheme
+{
+    string GetLayout(string name, bool fallbackToDefault = true);
+}
+```
+
+A theme's `GetLayout` method returns the Razor layout path for a given layout name (e.g., `"Default"`, `"Account"`, `"Empty"`). When `fallbackToDefault` is `true` and the requested layout is not implemented by the theme, it falls back to the default layout.
+
+### IThemeManager
+
+```csharp
+// framework/src/Volo.Abp.AspNetCore.Mvc.UI/Volo/Abp/AspNetCore/Mvc/UI/Theming/IThemeManager.cs
+public interface IThemeManager
+{
+    ITheme CurrentTheme { get; }
+}
+```
+
+`IThemeManager` is a singleton that exposes the currently active theme. Themes are registered via `AbpThemingOptions`:
+
+```csharp
+Configure<AbpThemingOptions>(options =>
+{
+    options.Themes.Add<BasicTheme>();
+    options.DefaultThemeName = BasicTheme.Name;
+});
+```
+
+### Standard layout names
+
+| Constant | Layout usage |
+|---|---|
+| `StandardLayouts.Application` | Main application pages with nav/sidebar |
+| `StandardLayouts.Account` | Login, register, password reset pages |
+| `StandardLayouts.Empty` | Raw output, no nav chrome |
+| `StandardLayouts.Public` | CMS Kit public-facing pages |
+
+## AbpAspNetCoreMvcUiThemeSharedModule
+
+This shared module (`Volo.Abp.AspNetCore.Mvc.UI.Theme.Shared`) provides the framework-side infrastructure used by all themes:
+
+```csharp
+[DependsOn(
+    typeof(AbpAspNetCoreMvcUiBootstrapModule),
+    typeof(AbpAspNetCoreMvcUiPackagesModule),
+    typeof(AbpAspNetCoreMvcUiWidgetsModule),
+    typeof(AbpFeaturesModule)
+)]
+public class AbpAspNetCoreMvcUiThemeSharedModule : AbpModule
+{
+    public override void ConfigureServices(ServiceConfigurationContext context)
+    {
+        Configure<AbpVirtualFileSystemOptions>(options =>
+        {
+            options.FileSets.AddEmbedded<AbpAspNetCoreMvcUiThemeSharedModule>(
+                "Volo.Abp.AspNetCore.Mvc.UI.Theme.Shared");
+        });
+
+        Configure<AbpBundlingOptions>(options =>
+        {
+            options.StyleBundles.Add(StandardBundles.Styles.Global, bundle =>
+            {
+                bundle.AddContributors(typeof(SharedThemeGlobalStyleContributor));
+            });
+
+            options.ScriptBundles.Add(StandardBundles.Scripts.Global, bundle =>
+            {
+                bundle.AddContributors(typeof(SharedThemeGlobalScriptContributor));
+            });
+        });
+    }
+}
+```
+
+## StandardBundles
+
+```csharp
+// framework/src/Volo.Abp.AspNetCore.Mvc.UI.Theme.Shared/Bundling/StandardBundles.cs
+public class StandardBundles
+{
+    public static class Styles
+    {
+        public static string Global = "Global";  // all global CSS
+    }
+
+    public static class Scripts
+    {
+        public static string Global = "Global";  // jQuery, Bootstrap JS, ABP core JS
+    }
+}
+```
+
+Every page layout emits these two bundles. Feature modules (Identity, CMS Kit, etc.) contribute their CSS/JS by appending contributors to `StandardBundles.Styles.Global` and `StandardBundles.Scripts.Global`.
+
+## PageToolbars
+
+Page toolbars allow modules to inject action buttons or custom components into specific pages without modifying the page's Razor code. The page declares a named toolbar; modules contribute items to it.
+
+### Key types
+
+```csharp
+// PageToolbar — named toolbar for a specific page
+public class PageToolbar
+{
+    public string PageName { get; }
+    public PageToolbarContributorList Contributors { get; set; }
+}
+
+// IPageToolbarManager — resolves and sorts toolbar items for rendering
+public interface IPageToolbarManager
+{
+    Task<PageToolbarItem[]> GetItemsAsync(string pageName);
+}
+```
+
+### Adding a button to a page toolbar
+
+```csharp
+// In ConfigureServices of a module
+Configure<AbpPageToolbarOptions>(options =>
+{
+    options.Configure<BooksPage>(toolbar =>
+    {
+        toolbar.AddButton(
+            LocalizableString.Create<MyResource>("NewBook"),
+            icon: "plus",
+            name: "CreateBook",
+            requiredPolicyName: BookPermissions.Create
+        );
+    });
+});
+```
+
+### Adding a custom component
+
+```csharp
+Configure<AbpPageToolbarOptions>(options =>
+{
+    options.Configure<BooksPage>(toolbar =>
+    {
+        toolbar.AddComponent<ExportButtonViewComponent>(
+            argument: new { entityType = "Book" },
+            order: 10,
+            requiredPolicyName: BookPermissions.Export
+        );
+    });
+});
+```
+
+### Rendering in a Razor page
+
+```html
+@inject IPageToolbarManager ToolbarManager
+
+<div class="page-toolbar">
+    @foreach (var item in await ToolbarManager.GetItemsAsync("Books"))
+    {
+        <abp-page-toolbar-item item="item" />
+    }
+</div>
+```
+
+### PageToolbarExtensions helper methods
+
+```csharp
+// framework/.../PageToolbars/PageToolbarExtensions.cs
+toolbar.AddComponent<TComponent>(argument, order, requiredPolicyName);
+toolbar.AddButton(text, icon, name, id, busyText, iconType, type, size, disabled, order, requiredPolicyName);
+```
+
+## Toolbars (Navigation bar items)
+
+The `Toolbar` system (`IToolbarManager`, `IToolbarContributor`) is separate from PageToolbars and targets the layout-level navigation chrome (e.g., the top-right user menu). `StandardToolbars.Main` is the canonical toolbar name:
+
+```csharp
+// framework/.../Toolbars/StandardToolbars.cs
+public static class StandardToolbars
+{
+    public const string Main = "Main";
+}
+```
+
+Contribute to it from a module:
+
+```csharp
+public class MyToolbarContributor : IToolbarContributor
+{
+    public Task ConfigureToolbarAsync(IToolbarConfigurationContext context)
+    {
+        if (context.Toolbar.Name == StandardToolbars.Main)
+        {
+            context.Toolbar.Items.Add(
+                new ToolbarItem(typeof(MyNavbarComponent)));
+        }
+        return Task.CompletedTask;
+    }
+}
+```
+
+## Basic Theme
+
+The Basic Theme is the reference implementation provided by ABP. It ships in multiple packages for different UI stacks.
+
+<Tabs>
+  <Tab title="MVC Razor">
+    **Package**: `Volo.Abp.AspNetCore.Mvc.UI.Theme.Basic`
+
+    Provides Bootstrap 5-based layouts. Register in your web module:
+
+    ```csharp
+    [DependsOn(typeof(AbpAspNetCoreMvcUiBasicThemeModule))]
+    public class MyWebModule : AbpModule
+    {
+        public override void ConfigureServices(ServiceConfigurationContext context)
+        {
+            Configure<AbpThemingOptions>(options =>
+            {
+                options.Themes.Add<BasicTheme>();
+                options.DefaultThemeName = BasicTheme.Name;
+            });
+        }
+    }
+    ```
+  </Tab>
+  <Tab title="Blazor Server">
+    **Package**: `Volo.Abp.AspNetCore.Components.Server.BasicTheme`
+
+    Module: `AbpAspNetCoreComponentsServerBasicThemeModule`
+
+    Provides `MainLayout.razor`, `NavMenu.razor`, `LoginDisplay.razor`, and bundle contributors via `BlazorBasicThemeBundles`:
+
+    ```csharp
+    // modules/basic-theme/src/.../Bundling/BlazorBasicThemeBundles.cs
+    // Defines BlazorBasicThemeBundles.Styles.Global and Scripts.Global
+    ```
+  </Tab>
+  <Tab title="Blazor WASM">
+    **Package**: `Volo.Abp.AspNetCore.Components.WebAssembly.BasicTheme`
+
+    Module: `AbpAspNetCoreComponentsWebAssemblyBasicThemeModule`
+
+    Uses static asset serving; bundle contributors emit `<link>` and `<script>` tags into `index.html` at build time.
+  </Tab>
+  <Tab title="MudBlazor">
+    **Packages**:
+    - `Volo.Abp.AspNetCore.Components.Server.MudBlazorBasicTheme` — Server
+    - `Volo.Abp.AspNetCore.Components.Web.MudBlazorBasicTheme` — WASM
+
+    Modules: `AbpAspNetCoreComponentsServerMudBlazorBasicThemeModule` / `AbpAspNetCoreComponentsWebMudBlazorBasicThemeModule`
+
+    Integrates [MudBlazor](https://mudblazor.com/) component library instead of Bootstrap. Bundle contributors for this variant are registered via `BlazorMudBlazorBasicThemeBundles` and `BlazorServerMudBlazorBasicThemeStyleContributor`.
+  </Tab>
+</Tabs>
+
+## Authoring a custom theme
+
+<Steps>
+  <Step title="Create a theme class">
+    ```csharp
+    public class CorporateTheme : ITheme
+    {
+        public const string Name = "Corporate";
+
+        public string GetLayout(string name, bool fallbackToDefault = true)
+        {
+            return name switch
+            {
+                StandardLayouts.Application =>
+                    "~/Themes/Corporate/Layouts/Application.cshtml",
+                StandardLayouts.Account =>
+                    "~/Themes/Corporate/Layouts/Account.cshtml",
+                _ => fallbackToDefault
+                    ? "~/Themes/Corporate/Layouts/Application.cshtml"
+                    : null
+            };
+        }
+    }
+    ```
+  </Step>
+  <Step title="Create a module">
+    ```csharp
+    [DependsOn(typeof(AbpAspNetCoreMvcUiThemeSharedModule))]
+    public class CorporateThemeModule : AbpModule
+    {
+        public override void ConfigureServices(ServiceConfigurationContext context)
+        {
+            Configure<AbpThemingOptions>(options =>
+            {
+                options.Themes.Add<CorporateTheme>();
+            });
+
+            Configure<AbpVirtualFileSystemOptions>(options =>
+            {
+                options.FileSets.AddEmbedded<CorporateThemeModule>();
+            });
+
+            Configure<AbpBundlingOptions>(options =>
+            {
+                options.StyleBundles
+                    .Configure(StandardBundles.Styles.Global, bundle =>
+                    {
+                        bundle.AddContributors(
+                            typeof(CorporateThemeGlobalStyleContributor));
+                    });
+            });
+        }
+    }
+    ```
+  </Step>
+  <Step title="Implement layout files">
+    Place Razor layout files in `Themes/Corporate/Layouts/` inside the project. Layouts should render `@RenderBody()`, inject `<abp-style-bundle>` / `<abp-script-bundle>` for the Global bundles, and render page toolbars via `@await Component.InvokeAsync("AbpPageToolbar", ...)`.
+  </Step>
+  <Step title="Register in the host application">
+    ```csharp
+    Configure<AbpThemingOptions>(options =>
+    {
+        options.DefaultThemeName = CorporateTheme.Name;
+    });
+    ```
+  </Step>
+</Steps>
+
+## See also
+
+- [Bundling & Minification](./bundling-minification) — how `StandardBundles` entries are populated
+- [CMS Kit Module](../modules/cms-kit) — uses `StandardLayouts.Public` for public pages

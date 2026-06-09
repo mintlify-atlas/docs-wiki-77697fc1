@@ -1,0 +1,455 @@
+---
+title: "Text Templating: Email, Document, and Code Generation"
+sidebarTitle: "Text Templating"
+description: "How ABP's ITemplateRenderer, TemplateDefinition, and pluggable rendering engines (Scriban, Razor) let you define localised, model-driven text templates."
+---
+
+ABP Text Templating provides a framework-agnostic way to render text from named template definitions. Templates can be plain strings, files on disk, embedded assembly resources loaded through the Virtual File System, or records fetched from a database. A pluggable rendering-engine system lets each template pick between Scriban (lightweight, sandboxed), Razor (full C# expressiveness), or a custom engine — all behind the same `ITemplateRenderer` API.
+
+<CardGroup cols={2}>
+  <Card title="ITemplateRenderer" icon="paintbrush">
+    Single entry point. Call RenderAsync with a template name, optional model, and optional culture to get rendered output.
+  </Card>
+  <Card title="TemplateDefinition" icon="file-code">
+    Declares a template: name, localization resource, layout, render engine, and custom properties.
+  </Card>
+  <Card title="ITemplateContentProvider" icon="database">
+    Resolves the raw template string from registered contributors (VFS files, database records, etc.).
+  </Card>
+  <Card title="AbpTextTemplatingOptions" icon="gear">
+    Wires together definition providers, content contributors, and rendering engine registrations.
+  </Card>
+</CardGroup>
+
+## Core Interfaces
+
+### `ITemplateRenderer`
+
+```csharp
+// framework/src/Volo.Abp.TextTemplating.Core/Volo/Abp/TextTemplating/ITemplateRenderer.cs
+
+public interface ITemplateRenderer
+{
+    Task<string> RenderAsync(
+        string templateName,
+        object? model = null,
+        string? cultureName = null,
+        Dictionary<string, object>? globalContext = null
+    );
+}
+```
+
+### `ITemplateDefinitionManager`
+
+```csharp
+// framework/src/Volo.Abp.TextTemplating.Core/Volo/Abp/TextTemplating/ITemplateDefinitionManager.cs
+
+public interface ITemplateDefinitionManager
+{
+    Task<TemplateDefinition> GetAsync(string name);
+    Task<IReadOnlyList<TemplateDefinition>> GetAllAsync();
+    Task<TemplateDefinition?> GetOrNullAsync(string name);
+}
+```
+
+### `ITemplateContentProvider`
+
+```csharp
+// framework/src/Volo.Abp.TextTemplating.Core/Volo/Abp/TextTemplating/ITemplateContentProvider.cs
+
+public interface ITemplateContentProvider
+{
+    // Resolve raw template string, optionally falling back to defaults
+    Task<string?> GetContentOrNullAsync(
+        string templateName,
+        string? cultureName = null,
+        bool tryDefaults = true,
+        bool useCurrentCultureIfCultureNameIsNull = true
+    );
+
+    Task<string?> GetContentOrNullAsync(
+        TemplateDefinition templateDefinition,
+        string? cultureName = null,
+        bool tryDefaults = true,
+        bool useCurrentCultureIfCultureNameIsNull = true
+    );
+}
+```
+
+## `TemplateDefinition`
+
+`TemplateDefinition` is the metadata record for a template. It is created in a `TemplateDefinitionProvider` and registered at startup:
+
+```csharp
+// framework/src/Volo.Abp.TextTemplating.Core/Volo/Abp/TextTemplating/TemplateDefinition.cs
+
+public class TemplateDefinition : IHasNameWithLocalizableDisplayName
+{
+    public string Name { get; }
+    public ILocalizableString DisplayName { get; set; }
+
+    // true if this template acts as a layout wrapper
+    public bool IsLayout { get; }
+
+    // Name of the layout template to wrap this one (optional)
+    public string? Layout { get; set; }
+
+    // Localisation resource name for inline-localised templates
+    public string? LocalizationResourceName { get; set; }
+
+    // true → single file contains all cultures (e.g., {{if culture == "en"}})
+    public bool IsInlineLocalized { get; set; }
+
+    // "Scriban", "Razor", or custom engine key
+    public string? RenderEngine { get; set; }
+
+    // Extensible property bag for provider-specific metadata
+    public Dictionary<string, object?> Properties { get; }
+
+    // Fluent setters
+    public TemplateDefinition WithRenderEngine(string renderEngine) { ... }
+    public TemplateDefinition WithProperty(string key, object value) { ... }
+}
+```
+
+## Defining and Registering Templates
+
+Create a provider by extending `TemplateDefinitionProvider`:
+
+```csharp
+public class MyTemplateDefinitionProvider : TemplateDefinitionProvider
+{
+    public override void Define(ITemplateDefinitionContext context)
+    {
+        // Layout template (shared wrapper for all email templates)
+        context.Add(
+            new TemplateDefinition(
+                name: "EmailLayout",
+                localizationResource: typeof(MyResource),
+                isLayout: true
+            ).WithRenderEngine(ScribanTemplateRenderingEngine.EngineName)
+             .WithVirtualFilePath("/MyApp/Templates/EmailLayout.tpl", isInlineLocalized: true)
+        );
+
+        // Content template using the layout above
+        context.Add(
+            new TemplateDefinition(
+                name: "WelcomeEmail",
+                localizationResource: typeof(MyResource)
+            )
+            .WithRenderEngine(ScribanTemplateRenderingEngine.EngineName)
+            .WithVirtualFilePath("/MyApp/Templates/WelcomeEmail", isInlineLocalized: false)
+            .WithLayout("EmailLayout")
+        );
+    }
+}
+```
+
+Register it in your module:
+
+```csharp
+Configure<AbpTextTemplatingOptions>(options =>
+{
+    options.DefinitionProviders.Add<MyTemplateDefinitionProvider>();
+});
+```
+
+## `AbpTextTemplatingOptions`
+
+```csharp
+// framework/src/Volo.Abp.TextTemplating.Core/Volo/Abp/TextTemplating/AbpTextTemplatingOptions.cs
+
+public class AbpTextTemplatingOptions
+{
+    // Ordered list of ITemplateDefinitionProvider types
+    public ITypeList<ITemplateDefinitionProvider> DefinitionProviders { get; }
+
+    // Ordered list of ITemplateContentContributor types
+    // (each is tried in order; first non-null result wins)
+    public ITypeList<ITemplateContentContributor> ContentContributors { get; }
+
+    // Map of engine key → ITemplateRenderingEngine type
+    public IDictionary<string, Type> RenderingEngines { get; }
+
+    // Used when TemplateDefinition.RenderEngine is null
+    public string? DefaultRenderingEngine { get; set; }
+
+    // Templates that have been deliberately removed
+    public HashSet<string> DeletedTemplates { get; }
+}
+```
+
+## Rendering Engines
+
+### How `AbpTemplateRenderer` dispatches
+
+```csharp
+// framework/src/Volo.Abp.TextTemplating.Core/Volo/Abp/TextTemplating/AbpTemplateRenderer.cs
+
+public virtual async Task<string> RenderAsync(
+    string templateName,
+    object? model = null,
+    string? cultureName = null,
+    Dictionary<string, object>? globalContext = null)
+{
+    var templateDefinition = await TemplateDefinitionManager.GetAsync(templateName);
+
+    // Use template-level engine, fall back to DefaultRenderingEngine
+    var renderEngine = templateDefinition.RenderEngine
+        ?? Options.DefaultRenderingEngine;
+
+    var providerType = Options.RenderingEngines.GetOrDefault(renderEngine!);
+
+    using (var scope = ServiceScopeFactory.CreateScope())
+    {
+        var engine = (ITemplateRenderingEngine)scope.ServiceProvider
+            .GetRequiredService(providerType);
+
+        return await engine.RenderAsync(templateName, model, cultureName, globalContext);
+    }
+}
+```
+
+<Tabs>
+  <Tab title="Scriban (Recommended)">
+    Scriban is a lightweight, sandboxed templating language. It is the recommended choice for email and document templates.
+
+    ```bash
+    dotnet add package Volo.Abp.TextTemplating.Scriban
+    ```
+
+    ```csharp
+    [DependsOn(typeof(AbpTextTemplatingScribanModule))]
+    public class MyModule : AbpModule { }
+    ```
+
+    Engine key: `"Scriban"` (`ScribanTemplateRenderingEngine.EngineName`)
+
+    Example template (`WelcomeEmail.tpl`):
+
+    ```liquid
+    Hello {{ model.user_name }},
+
+    Welcome to {{ model.app_name }}!
+
+    Your account was created on {{ model.created_date | date.to_string "%Y-%m-%d" }}.
+    ```
+
+    Rendering:
+
+    ```csharp
+    var result = await _templateRenderer.RenderAsync(
+        templateName: "WelcomeEmail",
+        model: new WelcomeEmailModel
+        {
+            UserName = "Alice",
+            AppName = "MyApp",
+            CreatedDate = DateTime.UtcNow
+        }
+    );
+    ```
+  </Tab>
+  <Tab title="Razor">
+    Razor templates are compiled to C# at runtime using Roslyn. They support the full C# language and are ideal for complex document generation (invoices, reports).
+
+    ```bash
+    dotnet add package Volo.Abp.TextTemplating.Razor
+    ```
+
+    ```csharp
+    [DependsOn(typeof(AbpTextTemplatingRazorModule))]
+    public class MyModule : AbpModule { }
+    ```
+
+    Engine key: `"Razor"` (`AbpRazorTemplateConsts.EngineName`)
+
+    Example template (`Invoice.cshtml`):
+
+    ```html
+    @model InvoiceModel
+    <h1>Invoice #@Model.Number</h1>
+    <p>Date: @Model.Date.ToString("yyyy-MM-dd")</p>
+    <table>
+    @foreach (var line in Model.Lines)
+    {
+        <tr>
+            <td>@line.Description</td>
+            <td>@line.Amount.ToString("C")</td>
+        </tr>
+    }
+    </table>
+    ```
+
+    <Note>
+    Razor templates are compiled at runtime on first use. This carries a startup cost; consider warming up templates in the application's `OnApplicationInitialization`.
+    </Note>
+  </Tab>
+  <Tab title="Core (Custom)">
+    `Volo.Abp.TextTemplating.Core` provides the base infrastructure. Use it when you want to register a completely custom `ITemplateRenderingEngine`:
+
+    ```csharp
+    public class HandlebarsTemplateRenderingEngine
+        : TemplateRenderingEngineBase, ITransientDependency
+    {
+        public override string Name => "Handlebars";
+
+        public override async Task<string> RenderAsync(
+            string templateName,
+            object? model = null,
+            string? cultureName = null,
+            Dictionary<string, object>? globalContext = null)
+        {
+            var content = await TemplateContentProvider
+                .GetContentOrNullAsync(templateName, cultureName);
+            // compile and render with Handlebars.NET
+        }
+    }
+
+    // Register in options
+    Configure<AbpTextTemplatingOptions>(options =>
+    {
+        options.RenderingEngines["Handlebars"] =
+            typeof(HandlebarsTemplateRenderingEngine);
+        options.DefaultRenderingEngine = "Handlebars";
+    });
+    ```
+  </Tab>
+</Tabs>
+
+## Localised Templates
+
+ABP supports two localisation strategies:
+
+### Per-culture files (folder-based)
+
+Place a folder at the virtual path; ABP picks the closest culture match:
+
+```
+/MyApp/Templates/WelcomeEmail/
+    en.tpl
+    tr.tpl
+    fr.tpl
+```
+
+`TemplateContentFileProvider` scans the directory for `.tpl` and `.cshtml` files and builds a `ILocalizedTemplateContentReader` that selects by culture.
+
+### Inline localised (single file)
+
+Set `IsInlineLocalized = true` and embed culture logic inside the template itself:
+
+```liquid
+{{~ if culture == "tr" ~}}
+Merhaba {{ model.user_name }}!
+{{~ else ~}}
+Hello {{ model.user_name }}!
+{{~ end ~}}
+```
+
+## VFS Integration
+
+Template content files are stored as Virtual File System resources. The `TemplateContentFileProvider` reads them via `IVirtualFileProvider`:
+
+```csharp
+// framework/src/Volo.Abp.TextTemplating.Core/.../VirtualFiles/TemplateContentFileProvider.cs
+
+public async Task<List<TemplateContentFileInfo>> GetFilesAsync(
+    TemplateDefinition templateDefinition)
+{
+    var virtualPath = templateDefinition.GetVirtualFilePathOrNull();
+
+    var fileInfo = VirtualFileProvider.GetFileInfo(virtualPath);
+
+    if (fileInfo.IsDirectory)
+    {
+        // folder of per-culture files
+        var folderReader = new VirtualFolderLocalizedTemplateContentReader(
+            new[] { ".tpl", ".cshtml" });
+        await folderReader.ReadContentsAsync(VirtualFileProvider, virtualPath);
+    }
+    else
+    {
+        // single inline-localised file
+    }
+}
+```
+
+Embed your template files in the module assembly and register the file set:
+
+```csharp
+Configure<AbpVirtualFileSystemOptions>(options =>
+{
+    options.FileSets.AddEmbedded<MyModule>(
+        baseNamespace: "MyApp",
+        baseFolder: "/Templates"
+    );
+});
+```
+
+## Common Use Cases
+
+<Steps>
+  <Step title="Email Notifications">
+    Define one layout template (`EmailLayout`) and one content template per email type (`PasswordReset`, `WelcomeEmail`, `OrderShipped`). Inject `ITemplateRenderer` into your email-sending service and pass the domain model.
+
+    ```csharp
+    var body = await _templateRenderer.RenderAsync(
+        "PasswordReset",
+        new PasswordResetModel { ResetLink = link, UserName = user.Name },
+        cultureName: user.PreferredLanguage
+    );
+    await _emailSender.SendAsync(user.Email, "Reset your password", body);
+    ```
+  </Step>
+  <Step title="Document Generation (Razor)">
+    Use the Razor engine for complex PDFs or HTML reports. Pass a rich model with collections, formatting helpers, and localised strings.
+
+    ```csharp
+    var html = await _templateRenderer.RenderAsync(
+        "InvoicePdf",
+        invoice,
+        cultureName: "en-GB"
+    );
+    var pdf = await _pdfRenderer.ConvertAsync(html);
+    ```
+  </Step>
+  <Step title="Code Generation">
+    Register Scriban templates for scaffold outputs. Pass a schema model and render C# class files, SQL migration scripts, or OpenAPI specs at build time or via a background job.
+  </Step>
+  <Step title="Dynamic Templates (Database)">
+    Implement `ITemplateContentContributor` to load template strings from the database, enabling non-developer customisation at runtime. Register it in `AbpTextTemplatingOptions.ContentContributors`.
+
+    ```csharp
+    public class DatabaseTemplateContentContributor
+        : ITemplateContentContributor, ITransientDependency
+    {
+        public async Task<string?> GetOrNullAsync(
+            TemplateContentContributorContext context)
+        {
+            return await _templateRepository
+                .FindContentAsync(context.TemplateDefinition.Name,
+                                  context.Culture);
+        }
+    }
+
+    Configure<AbpTextTemplatingOptions>(options =>
+    {
+        options.ContentContributors
+            .Add<DatabaseTemplateContentContributor>();
+    });
+    ```
+  </Step>
+</Steps>
+
+<Tip>
+The `TextTemplating.UI` module (available in ABP Commercial) adds a management screen that allows editing template content from the database without code deployments.
+</Tip>
+
+<Warning>
+`AbpTextTemplatingModule` (no suffix) is marked `[Obsolete]` in the source and simply re-exports `AbpTextTemplatingScribanModule`. Depend on `AbpTextTemplatingScribanModule` or `AbpTextTemplatingRazorModule` directly.
+</Warning>
+
+## Related Pages
+
+- [Virtual File System](/infrastructure/virtual-file-system) — template files are loaded via IVirtualFileProvider
+- [Background Jobs](/infrastructure/background-jobs) — schedule large document-generation tasks off the request thread
+- [Blob Storing](/infrastructure/blob-storing) — save rendered PDFs and documents to a blob container

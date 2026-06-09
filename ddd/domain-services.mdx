@@ -1,0 +1,270 @@
+---
+title: "Domain Services: Stateless Logic Across Aggregate Boundaries"
+sidebarTitle: "Domain Services"
+description: "Implementing DomainService: when to choose it over ApplicationService, and the lazy-loaded properties Clock, GuidGenerator, Logger, and CurrentTenant."
+---
+
+A **Domain Service** encapsulates business logic that does not naturally belong to a single aggregate root. When an operation must coordinate multiple aggregates, enforce an invariant that spans entity boundaries, or express a concept from the Ubiquitous Language that has no obvious home in any one entity, a domain service is the right abstraction. ABP formalises this with the `DomainService` base class and the `IDomainService` marker interface, both defined in `Volo.Abp.Ddd.Domain`.
+
+## `IDomainService` Marker Interface
+
+```csharp
+// Volo/Abp/Domain/Services/IDomainService.cs
+public interface IDomainService : ITransientDependency
+{
+}
+```
+
+Implementing `IDomainService` is all that is needed for the conventional registrar to pick up the class as a transient service. The marker also communicates intent: classes implementing this interface contain domain logic, not infrastructure concerns.
+
+---
+
+## `DomainService` Base Class
+
+```csharp
+// Volo/Abp/Domain/Services/DomainService.cs
+public abstract class DomainService : IDomainService
+{
+    public IAbpLazyServiceProvider LazyServiceProvider { get; set; } = default!;
+
+    protected IClock Clock
+        => LazyServiceProvider.LazyGetRequiredService<IClock>();
+
+    protected IGuidGenerator GuidGenerator
+        => LazyServiceProvider.LazyGetService<IGuidGenerator>(SimpleGuidGenerator.Instance);
+
+    protected ILoggerFactory LoggerFactory
+        => LazyServiceProvider.LazyGetRequiredService<ILoggerFactory>();
+
+    protected ICurrentTenant CurrentTenant
+        => LazyServiceProvider.LazyGetRequiredService<ICurrentTenant>();
+
+    protected IAsyncQueryableExecuter AsyncExecuter
+        => LazyServiceProvider.LazyGetRequiredService<IAsyncQueryableExecuter>();
+
+    protected ILogger Logger
+        => LazyServiceProvider.LazyGetService<ILogger>(
+               provider => LoggerFactory?.CreateLogger(GetType().FullName!)
+                           ?? NullLogger.Instance);
+}
+```
+
+All properties are resolved lazily via `IAbpLazyServiceProvider` — the service provider is not touched until the property is first read. This keeps constructor signatures clean and avoids circular dependency traps in complex service graphs.
+
+### Built-in Properties
+
+| Property | Interface | Purpose |
+|---|---|---|
+| `Clock` | `IClock` | Time-zone–aware "now" that respects the ABP clock settings |
+| `GuidGenerator` | `IGuidGenerator` | Sequential GUID generation (`SequentialGuidGenerator` by default) |
+| `GuidGenerator` fallback | `SimpleGuidGenerator` | Used when no generator is registered (e.g., unit tests without full DI) |
+| `CurrentTenant` | `ICurrentTenant` | Ambient tenant context for multi-tenant business rules |
+| `Logger` | `ILogger` | Category-named logger using the full type name |
+| `AsyncExecuter` | `IAsyncQueryableExecuter` | ORM-agnostic async LINQ execution |
+
+---
+
+## When to Use `DomainService` vs `ApplicationService`
+
+<CardGroup cols={2}>
+  <Card title="DomainService" icon="shield-halved">
+    **Use when the logic is part of the domain model itself.**
+    - Spans multiple aggregate roots
+    - Enforces invariants that cannot live in a single entity
+    - Expresses a Ubiquitous Language concept (e.g., `IssueManager`, `OrderPricer`)
+    - Has no concept of the current HTTP user, DTOs, or presentation concerns
+    - Tested by domain-layer unit tests with mocked repositories
+  </Card>
+  <Card title="ApplicationService" icon="layer-group">
+    **Use when orchestrating use cases.**
+    - Coordinates one or more domain services and repositories
+    - Maps entities to/from DTOs
+    - Enforces authorization (`CheckPolicyAsync`)
+    - Has knowledge of the current user and HTTP request context
+    - Tested by integration tests against a real database
+  </Card>
+</CardGroup>
+
+A heuristic: if the logic would still make sense in a CLI batch job with no HTTP context, it belongs in a domain service. If it requires knowing who is logged in or what format the response should be, it belongs in an application service.
+
+---
+
+## A Realistic Example
+
+```csharp
+// Domain Service: enforces the business rule that an issue can only
+// be assigned to a user who belongs to the same project.
+public class IssueManager : DomainService
+{
+    private readonly IRepository<Issue, Guid> _issueRepo;
+    private readonly IRepository<Project, Guid> _projectRepo;
+
+    public IssueManager(
+        IRepository<Issue, Guid> issueRepo,
+        IRepository<Project, Guid> projectRepo)
+    {
+        _issueRepo = issueRepo;
+        _projectRepo = projectRepo;
+    }
+
+    public async Task AssignToUserAsync(Issue issue, Guid userId)
+    {
+        var project = await _projectRepo.GetAsync(issue.ProjectId);
+
+        if (!project.IsMember(userId))
+        {
+            throw new BusinessException(IssueErrorCodes.UserNotProjectMember)
+                .WithData("userId", userId)
+                .WithData("projectId", project.Id);
+        }
+
+        issue.AssignTo(userId, Clock.Now);
+
+        Logger.LogInformation(
+            "Issue {IssueId} assigned to user {UserId} in project {ProjectId}",
+            issue.Id, userId, project.Id);
+    }
+
+    public async Task<Issue> CreateAsync(
+        Guid projectId,
+        string title,
+        string? description = null)
+    {
+        var issue = new Issue(GuidGenerator.Create(), projectId, title, description);
+
+        // Enforce uniqueness within the project
+        var existing = await _issueRepo.FindAsync(
+            i => i.ProjectId == projectId && i.Title == title);
+
+        if (existing != null)
+            throw new BusinessException(IssueErrorCodes.DuplicateTitle);
+
+        return issue;
+    }
+}
+```
+
+### Calling the Domain Service from an Application Service
+
+```csharp
+public class IssueAppService : ApplicationService, IIssueAppService
+{
+    private readonly IssueManager _issueManager;
+    private readonly IRepository<Issue, Guid> _issueRepo;
+
+    public IssueAppService(IssueManager issueManager, IRepository<Issue, Guid> issueRepo)
+    {
+        _issueManager = issueManager;
+        _issueRepo = issueRepo;
+    }
+
+    [Authorize(IssueManagementPermissions.Issues.Assign)]
+    public async Task AssignAsync(Guid issueId, AssignIssueDto input)
+    {
+        var issue = await _issueRepo.GetAsync(issueId);
+
+        await _issueManager.AssignToUserAsync(issue, input.UserId);
+
+        await _issueRepo.UpdateAsync(issue);
+    }
+}
+```
+
+---
+
+## Injecting Additional Services
+
+Inject constructor dependencies just like any other class. ABP's property injection (`LazyServiceProvider`) covers the built-in helpers; everything else goes through the constructor:
+
+```csharp
+public class OrderPricer : DomainService
+{
+    private readonly IRepository<PriceRule, Guid> _priceRuleRepo;
+    private readonly ICurrencyConverter _currencyConverter; // external service
+
+    public OrderPricer(
+        IRepository<PriceRule, Guid> priceRuleRepo,
+        ICurrencyConverter currencyConverter)
+    {
+        _priceRuleRepo = priceRuleRepo;
+        _currencyConverter = currencyConverter;
+    }
+
+    public async Task<Money> CalculateTotalAsync(Order order, string targetCurrency)
+    {
+        var rules = await _priceRuleRepo.GetListAsync(r => r.IsActive);
+        var baseTotal = ApplyRules(order, rules);
+        return await _currencyConverter.ConvertAsync(baseTotal, targetCurrency, Clock.Now);
+    }
+}
+```
+
+---
+
+## Multi-Tenant Domain Services
+
+`CurrentTenant` is available directly on `DomainService`. Use it when business rules differ by tenant:
+
+```csharp
+public async Task<int> GetMaxIssueLimitAsync()
+{
+    // Tenants on the Enterprise plan have no limit
+    if (CurrentTenant.IsAvailable &&
+        await IsEnterprisePlanAsync(CurrentTenant.Id!.Value))
+    {
+        return int.MaxValue;
+    }
+    return 50;
+}
+```
+
+---
+
+## Testing Domain Services
+
+Because domain services are pure classes registered as transient, they are straightforward to unit test with mock repositories:
+
+```csharp
+public class IssueManagerTests
+{
+    private readonly IssueManager _issueManager;
+    private readonly Mock<IRepository<Issue, Guid>> _issueRepoMock;
+    private readonly Mock<IRepository<Project, Guid>> _projectRepoMock;
+
+    public IssueManagerTests()
+    {
+        _issueRepoMock = new Mock<IRepository<Issue, Guid>>();
+        _projectRepoMock = new Mock<IRepository<Project, Guid>>();
+
+        // Minimal lazy service provider stub for the base class properties
+        var lazyProvider = AbpLazyServiceProviderStub.Create();
+
+        _issueManager = new IssueManager(
+            _issueRepoMock.Object,
+            _projectRepoMock.Object);
+        _issueManager.LazyServiceProvider = lazyProvider;
+    }
+
+    [Fact]
+    public async Task AssignToUser_ThrowsWhenUserNotMember()
+    {
+        var project = new Project(Guid.NewGuid(), "Test");
+        _projectRepoMock.Setup(r => r.GetAsync(It.IsAny<Guid>(), true, default))
+                        .ReturnsAsync(project);
+
+        var issue = new Issue(Guid.NewGuid(), project.Id, "Bug #1");
+
+        await Assert.ThrowsAsync<BusinessException>(
+            () => _issueManager.AssignToUserAsync(issue, Guid.NewGuid()));
+    }
+}
+```
+
+---
+
+## Related Pages
+
+- [Entities & Aggregates](./entities-and-aggregates) — The objects domain services operate on
+- [Application Services](./application-services) — How to consume domain services from the application layer
+- [Repositories](./repositories) — Injected into domain services for data access
+- [Unit of Work](./unit-of-work) — Wraps repository calls made inside domain service methods

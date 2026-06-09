@@ -1,0 +1,298 @@
+---
+title: "Distributed and Hybrid Caching with ABP Framework"
+sidebarTitle: "Caching"
+description: "ABP's typed IDistributedCache<T>, key normalization with tenant isolation, UnitOfWork-aware deferred writes, IHybridCache, and Redis integration options."
+---
+
+ABP wraps `Microsoft.Extensions.Caching.Distributed.IDistributedCache` with strongly-typed, multi-tenant-aware generic interfaces. Cache keys are automatically namespaced by tenant ID, and writes can be deferred until the current Unit of Work commits. A higher-level `IHybridCache` API layers an in-process L1 cache over the distributed L2 backend.
+
+<CardGroup cols={2}>
+  <Card title="IDistributedCache&lt;T&gt;" icon="box-archive">
+    Generic typed cache interface with multi-key batch operations and UoW-deferred semantics.
+  </Card>
+  <Card title="DistributedCacheKeyNormalizer" icon="key">
+    Injects tenant ID and global key prefix into every cache key, isolating tenant data automatically.
+  </Card>
+  <Card title="UnitOfWorkCacheItem&lt;T&gt;" icon="clock-rotate-left">
+    Wraps a pending cache write so it can be rolled back if the Unit of Work is aborted.
+  </Card>
+  <Card title="IHybridCache&lt;T&gt;" icon="layer-group">
+    Two-level cache: in-process L1 (HybridCache) + distributed L2, with the same ABP key normalization.
+  </Card>
+</CardGroup>
+
+## IDistributedCache&lt;TCacheItem, TCacheKey&gt;
+
+ABP's generic cache interface adds type safety and batch operations on top of `IDistributedCache`:
+
+```csharp
+public interface IDistributedCache<TCacheItem, TCacheKey>
+    where TCacheItem : class
+{
+    // Synchronous
+    TCacheItem? Get(TCacheKey key, bool? hideErrors = null, bool considerUow = false);
+    KeyValuePair<TCacheKey, TCacheItem?>[] GetMany(
+        IEnumerable<TCacheKey> keys, bool? hideErrors = null, bool considerUow = false);
+
+    // Asynchronous
+    Task<TCacheItem?> GetAsync(TCacheKey key,
+        bool? hideErrors = null, bool considerUow = false,
+        CancellationToken token = default);
+
+    Task SetAsync(TCacheKey key, TCacheItem value,
+        DistributedCacheEntryOptions? options = null,
+        bool? hideErrors = null, bool considerUow = false,
+        CancellationToken token = default);
+
+    Task RemoveAsync(TCacheKey key,
+        bool? hideErrors = null, bool considerUow = false,
+        CancellationToken token = default);
+
+    // Convenience: get or create in one call
+    Task<TCacheItem?> GetOrAddAsync(TCacheKey key,
+        Func<Task<TCacheItem>> factory,
+        Func<DistributedCacheEntryOptions>? optionsFactory = null,
+        bool? hideErrors = null, bool considerUow = false,
+        CancellationToken token = default);
+}
+
+// Short form: key type is implicitly string
+public interface IDistributedCache<TCacheItem> : IDistributedCache<TCacheItem, string>
+    where TCacheItem : class { }
+```
+
+Inject `IDistributedCache<BookCacheItem>` into any service — no `IDistributedCache` boilerplate needed.
+
+## CacheNameAttribute
+
+By default the cache name (used in key normalization) is derived from the full type name with `CacheItem` stripped. Override it explicitly:
+
+```csharp
+// Default name: "Acme.BookStore.Books.BookCacheItem" → "Acme.BookStore.Books.Book"
+public class BookCacheItem { ... }
+
+// Explicit name:
+[CacheName("Book")]
+public class BookCacheItem { ... }
+```
+
+```csharp
+// CacheNameAttribute — name resolution logic:
+public static string GetCacheName(Type cacheItemType)
+{
+    var attr = cacheItemType
+        .GetCustomAttributes(true)
+        .OfType<CacheNameAttribute>()
+        .FirstOrDefault();
+
+    return attr?.Name ?? cacheItemType.FullName!.RemovePostFix("CacheItem")!;
+}
+```
+
+## AbpDistributedCacheOptions
+
+Global options for all caches in the application:
+
+```csharp
+Configure<AbpDistributedCacheOptions>(options =>
+{
+    options.KeyPrefix      = "MyApp:";   // prepend to every cache key
+    options.HideErrors     = true;       // swallow Redis connection errors
+    options.GlobalCacheEntryOptions = new DistributedCacheEntryOptions
+    {
+        SlidingExpiration = TimeSpan.FromMinutes(20)
+    };
+
+    // Per-type configuration:
+    options.ConfigureCache<BookCacheItem>(new DistributedCacheEntryOptions
+    {
+        AbsoluteExpiration = DateTimeOffset.UtcNow.AddHours(1)
+    });
+});
+```
+
+## Key Normalization and Tenant Isolation
+
+`DistributedCacheKeyNormalizer` builds the final cache key from the cache name, global prefix, and current tenant:
+
+```csharp
+public virtual string NormalizeKey(DistributedCacheKeyNormalizeArgs args)
+{
+    // Base key: "c:{CacheName},k:{KeyPrefix}{RawKey}"
+    var normalizedKey = $"c:{args.CacheName},k:{DistributedCacheOptions.KeyPrefix}{args.Key}";
+
+    // Tenant prefix when running inside a tenant context:
+    if (!args.IgnoreMultiTenancy && CurrentTenant.Id.HasValue)
+    {
+        normalizedKey = $"t:{CurrentTenant.Id.Value},{normalizedKey}";
+    }
+    return normalizedKey;
+}
+```
+
+Example resolved keys:
+
+```
+Host context:   "c:Book,k:MyApp:42"
+Tenant context: "t:3fa85f64-5717-4562-b3fc-2c963f66afa6,c:Book,k:MyApp:42"
+```
+
+<Warning>
+Pass `ignoreMultiTenancy: true` only for genuinely cross-tenant shared data. Most caches should stay tenant-isolated to prevent data leakage.
+</Warning>
+
+## Unit of Work Deferred Cache Writes
+
+When `considerUow = true`, cache mutations are buffered inside the current Unit of Work and only flushed to the real distributed cache when the UoW commits successfully:
+
+```csharp
+[Serializable]
+public class UnitOfWorkCacheItem<TValue> where TValue : class
+{
+    public bool    IsRemoved { get; set; }
+    public TValue? Value     { get; set; }
+
+    public UnitOfWorkCacheItem<TValue> SetValue(TValue value)
+    {
+        Value     = value;
+        IsRemoved = false;
+        return this;
+    }
+
+    public UnitOfWorkCacheItem<TValue> RemoveValue()
+    {
+        Value     = null;
+        IsRemoved = true;
+        return this;
+    }
+}
+```
+
+```mermaid
+sequenceDiagram
+    participant Service
+    participant Cache as IDistributedCache&lt;T&gt;
+    participant UoW as UnitOfWork
+    participant Redis
+
+    Service->>Cache: SetAsync(key, value, considerUow: true)
+    Cache->>UoW: Register UnitOfWorkCacheItem (pending)
+    
+    alt UoW commits
+        UoW->>Cache: Flush pending items
+        Cache->>Redis: SET key value
+    else UoW rolled back
+        UoW->>Cache: Discard pending items
+        Note over Redis: Cache unchanged
+    end
+```
+
+<Tip>
+Use `considerUow: true` in application service methods that also modify the database, so the cache and DB stay consistent even when an exception causes the UoW to roll back.
+</Tip>
+
+## Usage Example
+
+```csharp
+public class BookAppService : ApplicationService
+{
+    private readonly IDistributedCache<BookCacheItem> _cache;
+    private readonly IBookRepository _repo;
+
+    public BookAppService(
+        IDistributedCache<BookCacheItem> cache,
+        IBookRepository repo)
+    {
+        _cache = cache;
+        _repo  = repo;
+    }
+
+    public async Task<BookCacheItem> GetAsync(Guid id)
+    {
+        return await _cache.GetOrAddAsync(
+            id.ToString(),
+            async () =>
+            {
+                var book = await _repo.GetAsync(id);
+                return ObjectMapper.Map<Book, BookCacheItem>(book);
+            },
+            () => new DistributedCacheEntryOptions
+            {
+                AbsoluteExpirationRelativeToNow = TimeSpan.FromHours(2)
+            }
+        );
+    }
+
+    public async Task UpdateAsync(Guid id, UpdateBookInput input)
+    {
+        await _repo.UpdateAsync(...);
+        await _cache.RemoveAsync(id.ToString(), considerUow: true);
+    }
+}
+```
+
+## IHybridCache — Two-Level Caching
+
+`IHybridCache<TCacheItem>` adds an in-process L1 layer (backed by `Microsoft.Extensions.Caching.Hybrid.HybridCache`) in front of the distributed L2 cache:
+
+```csharp
+public interface IHybridCache<TCacheItem, TCacheKey>
+    where TCacheItem : class
+{
+    Task<TCacheItem?> GetOrCreateAsync(
+        TCacheKey key,
+        Func<Task<TCacheItem>> factory,
+        Func<HybridCacheEntryOptions>? optionsFactory = null,
+        bool? hideErrors  = null,
+        bool  considerUow = false,
+        CancellationToken token = default);
+
+    Task SetAsync(TCacheKey key, TCacheItem value,
+        HybridCacheEntryOptions? options = null,
+        bool? hideErrors = null, bool considerUow = false,
+        CancellationToken token = default);
+
+    Task RemoveAsync(TCacheKey key, ...);
+    Task RemoveManyAsync(IEnumerable<TCacheKey> keys, ...);
+}
+```
+
+Configure the hybrid layer in `AbpHybridCacheOptions`:
+
+```csharp
+Configure<AbpHybridCacheOptions>(options =>
+{
+    options.GlobalHybridCacheEntryOptions = new HybridCacheEntryOptions
+    {
+        LocalCacheExpiration    = TimeSpan.FromSeconds(30),
+        Expiration              = TimeSpan.FromHours(1)
+    };
+});
+```
+
+## Redis Integration
+
+Add `Volo.Abp.Caching.StackExchangeRedis` and depend on `AbpStackExchangeRedisCacheModule`:
+
+```csharp
+// Module dependency:
+[DependsOn(typeof(AbpStackExchangeRedisCacheModule))]
+public class MyModule : AbpModule { }
+
+// appsettings.json:
+{
+  "Redis": {
+    "Configuration": "127.0.0.1:6379,abortConnect=false",
+    "InstanceName": "MyApp_"
+  }
+}
+```
+
+No other changes are needed — `IDistributedCache<T>` automatically uses Redis once the module is registered.
+
+## Related Pages
+
+- [Auditing](./auditing) — entity history can be cached to avoid repeated DB queries
+- [Settings](./settings) — `SettingProvider` caches resolved values using `IDistributedCache<T>`
+- [Authorization](./authorization-permissions) — permission grant results are cached per provider
+- [Features](./features) — feature values are cached in the feature checker pipeline

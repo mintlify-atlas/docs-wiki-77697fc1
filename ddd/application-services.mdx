@@ -1,0 +1,323 @@
+---
+title: "Application Services: Use-Case Orchestration in ABP"
+sidebarTitle: "Application Services"
+description: "Covers ApplicationService, CrudAppService variants, IObjectMapper, CheckPolicyAsync enforcement, and automatic HTTP API exposure via ABP conventions."
+---
+
+Application services sit at the boundary between the domain model and external consumers (HTTP APIs, gRPC, CLI commands, etc.). They translate requests into domain operations, enforce authorization, map results into Data Transfer Objects, and coordinate the Unit of Work. ABP's `ApplicationService` base class (`Volo.Abp.Ddd.Application`) provides the scaffolding that makes this layer consistent and concise across a large codebase.
+
+## `IApplicationService` Marker Interface
+
+```csharp
+// Volo/Abp/Application/Services/IApplicationService.cs
+public interface IApplicationService { }
+```
+
+This interface is the contract that the conventional controller generator (`AbpServiceConventionOptions`) uses to discover application services and expose them as HTTP API controllers automatically. Any class implementing `IApplicationService` can be routed without a manually written controller.
+
+---
+
+## `ApplicationService` Base Class
+
+```csharp
+// Volo/Abp/Application/Services/ApplicationService.cs
+public abstract class ApplicationService :
+    IApplicationService,
+    IAvoidDuplicateCrossCuttingConcerns,
+    IValidationEnabled,
+    IUnitOfWorkEnabled,
+    IAuditingEnabled,
+    IGlobalFeatureCheckingEnabled,
+    ITransientDependency
+{
+    public IAbpLazyServiceProvider LazyServiceProvider { get; set; } = default!;
+
+    protected IUnitOfWorkManager UnitOfWorkManager { get; }
+    protected IObjectMapper ObjectMapper { get; }
+    protected IGuidGenerator GuidGenerator { get; }
+    protected ICurrentTenant CurrentTenant { get; }
+    protected ICurrentUser CurrentUser { get; }
+    protected IAuthorizationService AuthorizationService { get; }
+    protected ISettingProvider SettingProvider { get; }
+    protected IClock Clock { get; }
+    protected IFeatureChecker FeatureChecker { get; }
+    protected IStringLocalizer L { get; }    // localization shorthand
+    protected ILogger Logger { get; }
+
+    protected IUnitOfWork? CurrentUnitOfWork => UnitOfWorkManager?.Current;
+
+    protected virtual async Task CheckPolicyAsync(string? policyName)
+    {
+        if (string.IsNullOrEmpty(policyName)) return;
+        await AuthorizationService.CheckAsync(policyName!);
+    }
+}
+```
+
+Every property is lazily resolved from `IAbpLazyServiceProvider`. Because `ApplicationService` implements `ITransientDependency`, `IUnitOfWorkEnabled`, and `IAuditingEnabled`, every method call automatically participates in a Unit of Work and is recorded in the audit log without any extra configuration.
+
+### Localization
+
+Set `LocalizationResource` in your service's constructor to bind `L` to a specific resource:
+
+```csharp
+public class BookAppService : ApplicationService
+{
+    public BookAppService()
+    {
+        LocalizationResource = typeof(BookStoreResource);
+    }
+
+    public string GetGreeting()
+        => L["Welcome"]; // resolved from BookStoreResource
+}
+```
+
+---
+
+## Object Mapping with `IObjectMapper`
+
+`ApplicationService.ObjectMapper` is resolved through `IObjectMapper<TContext>` when `ObjectMapperContext` is set, allowing module-specific AutoMapper profiles:
+
+```csharp
+public class BookAppService : ApplicationService
+{
+    public BookAppService()
+    {
+        ObjectMapperContext = typeof(BookStoreApplicationModule);
+    }
+
+    public async Task<BookDto> GetAsync(Guid id)
+    {
+        var book = await _bookRepo.GetAsync(id);
+        return ObjectMapper.Map<Book, BookDto>(book); // uses BookStoreApplicationModule profile
+    }
+}
+```
+
+AutoMapper profiles are registered in `ConfigureServices`:
+
+```csharp
+public class BookStoreApplicationAutoMapperProfile : Profile
+{
+    public BookStoreApplicationAutoMapperProfile()
+    {
+        CreateMap<Book, BookDto>();
+        CreateMap<CreateUpdateBookDto, Book>();
+    }
+}
+```
+
+---
+
+## Permission Checking
+
+<Tabs>
+  <Tab title="Declarative [Authorize]">
+    ```csharp
+    [Authorize(BookStorePermissions.Books.Default)]
+    public async Task<BookDto> GetAsync(Guid id)
+    {
+        return ObjectMapper.Map<Book, BookDto>(await _bookRepo.GetAsync(id));
+    }
+    ```
+    `[Authorize]` is enforced by ABP's authorization middleware / interceptor before the method body runs.
+  </Tab>
+  <Tab title="Imperative CheckPolicyAsync">
+    ```csharp
+    public async Task<BookDto> CreateAsync(CreateBookDto input)
+    {
+        await CheckPolicyAsync(BookStorePermissions.Books.Create);
+        // throws AbpAuthorizationException if the current user lacks this policy
+        var book = new Book(GuidGenerator.Create(), input.Name, input.Price);
+        await _bookRepo.InsertAsync(book, autoSave: true);
+        return ObjectMapper.Map<Book, BookDto>(book);
+    }
+    ```
+    Imperative checks are useful when the permission name depends on runtime data.
+  </Tab>
+</Tabs>
+
+---
+
+## `CrudAppService<TEntity, TEntityDto, TKey>`
+
+ABP ships a layered family of generic CRUD application services that eliminate boilerplate for standard entities. The hierarchy (all in `Volo/Abp/Application/Services/CrudAppService.cs`):
+
+```
+CrudAppService<TEntity, TEntityDto, TKey>
+  └─ CrudAppService<TEntity, TEntityDto, TKey, TGetListInput>
+       └─ CrudAppService<TEntity, TEntityDto, TKey, TGetListInput, TCreateInput>
+            └─ CrudAppService<TEntity, TEntityDto, TKey, TGetListInput, TCreateInput, TUpdateInput>
+                 └─ CrudAppService<TEntity, TGetOutputDto, TGetListOutputDto, TKey,
+                                   TGetListInput, TCreateInput, TUpdateInput>
+                      └─ AbstractKeyCrudAppService<...>  (root)
+```
+
+The most commonly used form:
+
+```csharp
+public class BookAppService :
+    CrudAppService<Book, BookDto, Guid, PagedAndSortedResultRequestDto,
+                   CreateUpdateBookDto>,
+    IBookAppService
+{
+    public BookAppService(IRepository<Book, Guid> repository)
+        : base(repository)
+    {
+        // Optional: set policy names to require for each operation
+        GetPolicyName    = BookStorePermissions.Books.Default;
+        GetListPolicyName = BookStorePermissions.Books.Default;
+        CreatePolicyName  = BookStorePermissions.Books.Create;
+        UpdatePolicyName  = BookStorePermissions.Books.Edit;
+        DeletePolicyName  = BookStorePermissions.Books.Delete;
+    }
+}
+```
+
+This single class gives you `GetAsync`, `GetListAsync`, `CreateAsync`, `UpdateAsync`, and `DeleteAsync` fully wired to the repository, object mapper, and permission policies.
+
+### Default Sorting
+
+`CrudAppService` applies default sorting automatically:
+
+```csharp
+protected override IQueryable<TEntity> ApplyDefaultSorting(IQueryable<TEntity> query)
+{
+    if (typeof(TEntity).IsAssignableTo<IHasCreationTime>())
+        return query.OrderByDescending(e => ((IHasCreationTime)e).CreationTime);
+    else
+        return query.OrderByDescending(e => e.Id);
+}
+```
+
+Override `ApplyDefaultSorting` or `ApplySorting` to customise.
+
+---
+
+## `AbstractKeyCrudAppService`
+
+`AbstractKeyCrudAppService` (`AbstractKeyCrudAppService.cs`) is the root of the CRUD hierarchy and handles entities with composite or non-standard keys by requiring you to implement `DeleteByIdAsync` and `GetEntityByIdAsync`:
+
+```csharp
+public abstract class AbstractKeyCrudAppService<TEntity, TGetOutputDto, TGetListOutputDto,
+    TKey, TGetListInput, TCreateInput, TUpdateInput>
+    : AbstractKeyReadOnlyAppService<TEntity, TGetOutputDto, TGetListOutputDto, TKey, TGetListInput>
+{
+    protected abstract Task DeleteByIdAsync(TKey id);
+    protected abstract Task<TEntity> GetEntityByIdAsync(TKey id);
+
+    public virtual async Task<TGetOutputDto> CreateAsync(TCreateInput input)
+    {
+        await CheckCreatePolicyAsync();
+        var entity = await MapToEntityAsync(input);
+        TryToSetTenantId(entity);
+        await Repository.InsertAsync(entity, autoSave: true);
+        return await MapToGetOutputDtoAsync(entity);
+    }
+
+    public virtual async Task<TGetOutputDto> UpdateAsync(TKey id, TUpdateInput input)
+    {
+        await CheckUpdatePolicyAsync();
+        var entity = await GetEntityByIdAsync(id);
+        await MapToEntityAsync(input, entity);
+        await Repository.UpdateAsync(entity, autoSave: true);
+        return await MapToGetOutputDtoAsync(entity);
+    }
+}
+```
+
+---
+
+## HTTP API Exposure (Conventional Controllers)
+
+Any class implementing `IApplicationService` is automatically exposed as an HTTP API when you call:
+
+```csharp
+// In module ConfigureServices
+Configure<AbpAspNetCoreMvcOptions>(options =>
+{
+    options.ConventionalControllers.Create(typeof(BookStoreApplicationModule).Assembly);
+});
+```
+
+ABP generates a controller proxy that:
+
+- Maps method name prefixes to HTTP verbs (`Get*` → GET, `Create*` → POST, `Update*` → PUT, `Delete*` → DELETE)
+- Builds the route from the service name (strips `AppService`/`ApplicationService` suffix) and method name
+- Applies `[Authorize]` attributes from your service to the controller action
+
+<Tip>
+You can override routing conventions per service by applying `[Area]`, `[Route]`, or the `RemoteService(IsEnabled = false)` attribute to opt out of automatic exposure for a specific service.
+</Tip>
+
+---
+
+## Customising `CrudAppService`
+
+<Steps>
+  <Step title="Override mapping">
+    ```csharp
+    protected override async Task<Book> MapToEntityAsync(CreateUpdateBookDto createInput)
+    {
+        var book = await base.MapToEntityAsync(createInput);
+        book.SetPublishDate(createInput.PublishDate, Clock.Now);
+        return book;
+    }
+    ```
+  </Step>
+  <Step title="Override filtering">
+    ```csharp
+    protected override async Task<IQueryable<Book>> CreateFilteredQueryAsync(
+        PagedAndSortedResultRequestDto input)
+    {
+        var query = await base.CreateFilteredQueryAsync(input);
+        return query.WhereIf(!input.Filter.IsNullOrWhiteSpace(),
+                              b => b.Name.Contains(input.Filter!));
+    }
+    ```
+  </Step>
+  <Step title="Override list output DTO">
+    ```csharp
+    // Use a separate lightweight DTO for the list response
+    public class BookAppService :
+        CrudAppService<Book, BookDto, BookListDto, Guid,
+                       BookListRequestDto, CreateBookDto, UpdateBookDto>
+    {
+        protected override BookListDto MapToGetListOutputDto(Book entity)
+            => new BookListDto { Id = entity.Id, Name = entity.Name };
+    }
+    ```
+  </Step>
+</Steps>
+
+---
+
+## DTOs and Validation
+
+ABP validates all application service inputs automatically (via `IValidationEnabled`). Annotate DTO properties with standard Data Annotations or `IValidatableObject`:
+
+```csharp
+public class CreateBookDto
+{
+    [Required]
+    [StringLength(BookConsts.MaxNameLength)]
+    public string Name { get; set; } = string.Empty;
+
+    [Range(0.01, 1_000_000)]
+    public decimal Price { get; set; }
+
+    public BookType Type { get; set; }
+}
+```
+
+ABP throws `AbpValidationException` (HTTP 400) when validation fails, with a structured list of field errors.
+
+---
+
+## Related Pages
+
+- [Domain Services](./domain-services) — Business logic consumed by application services
+- [Repositories](./repositories) — Data access layer injected into application services
+- [Unit of Work](./unit-of-work) — Automatic UoW wrapping applied to every application service method
+- [Dependency Injection](../module-system/dependency-injection) — How application services are registered conventionally
