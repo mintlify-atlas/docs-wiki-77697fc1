@@ -230,13 +230,17 @@ ABP integrates with `Asp.Versioning` (formerly `Microsoft.AspNetCore.Mvc.Version
 When `ExposeClientProxyServices` is `true`, ABP generates a JavaScript proxy bundle so that browser clients can call application service methods without writing fetch/axios boilerplate. The script generation is controlled by `DynamicJavaScriptProxyOptions`:
 
 ```csharp
+// Volo.Abp.Http/Volo/Abp/Http/ProxyScripting/Generators/JQuery/DynamicJavaScriptProxyOptions.cs
 Configure<DynamicJavaScriptProxyOptions>(options =>
 {
-    options.EnabledModules.Add("app"); // rootPath
+    // All modules are enabled by default; disable specific rootPath modules with:
+    options.DisableModule("app"); // disables proxy generation for rootPath "app"
+    // Or re-enable a previously disabled module:
+    options.EnableModule("app");
 });
 ```
 
-The generated JavaScript calls `/api/abp/api-definition` at startup to discover available services, then wraps each one in a promise-based proxy accessible via `abp.services.<namespace>.<serviceName>.<methodName>(args)`.
+`DynamicJavaScriptProxyOptions` exposes a `DisabledModules` hash-set. All modules are proxied unless explicitly listed in `DisabledModules`. The generated JavaScript calls `/api/abp/api-definition` at startup to discover available services, then wraps each one in a promise-based proxy accessible via `abp.services.<namespace>.<serviceName>.<methodName>(args)`.
 
 ## AbpMvcActionDescriptorProvider
 

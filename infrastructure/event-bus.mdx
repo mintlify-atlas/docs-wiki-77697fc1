@@ -259,7 +259,7 @@ sequenceDiagram
     ```
 
     ```csharp
-    [DependsOn(typeof(AbpRabbitMqEventBusModule))]
+    [DependsOn(typeof(AbpEventBusRabbitMqModule))]
     public class MyModule : AbpModule { }
 
     Configure<AbpRabbitMqEventBusOptions>(options =>
@@ -275,7 +275,7 @@ sequenceDiagram
     ```
 
     ```csharp
-    [DependsOn(typeof(AbpKafkaEventBusModule))]
+    [DependsOn(typeof(AbpEventBusKafkaModule))]
     public class MyModule : AbpModule { }
 
     Configure<AbpKafkaEventBusOptions>(options =>
@@ -291,12 +291,12 @@ sequenceDiagram
     ```
 
     ```csharp
-    [DependsOn(typeof(AbpAzureServiceBusEventBusModule))]
+    [DependsOn(typeof(AbpEventBusAzureModule))]
     public class MyModule : AbpModule { }
 
     Configure<AbpAzureEventBusOptions>(options =>
     {
-        options.ConnectionString = "...";
+        options.ConnectionName = "...";
         options.TopicName = "MyApp";
     });
     ```
@@ -307,7 +307,7 @@ sequenceDiagram
     ```
 
     ```csharp
-    [DependsOn(typeof(AbpDaprEventBusModule))]
+    [DependsOn(typeof(AbpEventBusDaprModule))]
     public class MyModule : AbpModule { }
     ```
   </Tab>
@@ -317,7 +317,7 @@ sequenceDiagram
     ```
 
     ```csharp
-    [DependsOn(typeof(AbpRebusEventBusModule))]
+    [DependsOn(typeof(AbpEventBusRebusModule))]
     public class MyModule : AbpModule { }
     ```
   </Tab>

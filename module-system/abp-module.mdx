@@ -72,6 +72,11 @@ public class DependsOnAttribute : Attribute, IDependedTypesProvider
     {
         DependedTypes = dependedTypes ?? Type.EmptyTypes;
     }
+
+    public virtual Type[] GetDependedTypes()
+    {
+        return DependedTypes;
+    }
 }
 ```
 
@@ -147,7 +152,7 @@ public class AbpModuleDescriptor : IAbpModuleDescriptor
 {
     public Type Type { get; }
     public Assembly Assembly { get; }
-    public Assembly[] AllAssemblies { get; }   // includes @AdditionalAssembly assemblies
+    public Assembly[] AllAssemblies { get; }   // populated by AbpModuleHelper.GetAllAssemblies
     public IAbpModule Instance { get; }
     public bool IsLoadedAsPlugIn { get; }
     public IReadOnlyList<IAbpModuleDescriptor> Dependencies { get; }

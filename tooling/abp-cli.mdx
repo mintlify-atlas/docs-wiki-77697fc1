@@ -175,7 +175,6 @@ public interface IConsoleCommand
 {
     Task ExecuteAsync(CommandLineArgs commandLineArgs);
     string GetUsageInfo();
-    string GetShortDescription();
 }
 ```
 
@@ -208,7 +207,7 @@ public class AuthService : IAuthService, ITransientDependency
 }
 ```
 
-Credentials are stored locally (encrypted) after `abp login`. The `abp login-info` command calls `GetLoginInfoAsync()` to display the current session.
+`IAuthService` also exposes `LoginAsync`, `LogoutAsync`, and `CheckMultipleOrganizationsAsync`. Credentials are stored locally (encrypted) after `abp login`. The `abp login-info` command calls `GetLoginInfoAsync()` to display the current session.
 
 ---
 

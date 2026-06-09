@@ -29,6 +29,11 @@ public interface IUnitOfWork : IDatabaseApiContainer, ITransactionApiContainer, 
     bool IsReserved { get; }
     bool IsDisposed { get; }
     bool IsCompleted { get; }
+    string? ReservationName { get; }  // name used to reserve this UoW
+
+    void SetOuter(IUnitOfWork? outer);
+    void Initialize(AbpUnitOfWorkOptions options);
+    void Reserve(string reservationName);
 
     Task SaveChangesAsync(CancellationToken cancellationToken = default);
     Task CompleteAsync(CancellationToken cancellationToken = default);
@@ -36,8 +41,10 @@ public interface IUnitOfWork : IDatabaseApiContainer, ITransactionApiContainer, 
 
     void OnCompleted(Func<Task> handler);  // run handler after commit
 
-    void AddOrReplaceLocalEvent(UnitOfWorkEventRecord record, ...);
-    void AddOrReplaceDistributedEvent(UnitOfWorkEventRecord record, ...);
+    void AddOrReplaceLocalEvent(UnitOfWorkEventRecord eventRecord,
+        Predicate<UnitOfWorkEventRecord>? replacementSelector = null);
+    void AddOrReplaceDistributedEvent(UnitOfWorkEventRecord eventRecord,
+        Predicate<UnitOfWorkEventRecord>? replacementSelector = null);
 }
 ```
 

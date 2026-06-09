@@ -18,6 +18,7 @@ abp/
 │   ├── common.ps1             # Shared solution list + path helpers
 │   └── test-all.ps1           # Run all tests with Coverlet coverage
 ├── common.props               # Version, package metadata, .abppkg items
+├── configureawait.props       # Fody ConfigureAwait weaver (Release only)
 ├── Directory.Build.props      # IsTestProject detection, Coverlet injection
 ├── Directory.Packages.props   # Centralized package version management
 └── NuGet.Config               # Feed configuration
@@ -61,7 +62,9 @@ if ($full -eq "-f") {
         "../templates/module/aspnet-core",
         "../templates/app/aspnet-core",
         "../templates/console",
-        "../templates/app-nolayers/aspnet-core"
+        "../templates/app-nolayers/aspnet-core",
+        "../abp_io/AbpIoLocalization",
+        "../source-code"
     )
     if ($env:OS -eq "Windows_NT") {
         $solutionPaths += "../templates/wpf"
@@ -179,6 +182,24 @@ Every `.csproj` in the ABP framework imports `common.props` via `Directory.Build
       <IncludeAssets>runtime; build; native; contentfiles; analyzers</IncludeAssets>
     </PackageReference>
   </ItemGroup>
+
+  <!-- .abppkg.analyze.json — packed into non-web/non-Razor packages only -->
+  <ItemGroup Condition="'$(UsingMicrosoftNETSdkWeb)' != 'true' AND '$(UsingMicrosoftNETSdkRazor)' != 'true'">
+    <None Remove="*.abppkg.analyze.json" />
+    <Content Include="*.abppkg.analyze.json">
+      <Pack>true</Pack>
+      <PackagePath>content\</PackagePath>
+    </Content>
+  </ItemGroup>
+
+  <!-- .abppkg — packed into all packages -->
+  <ItemGroup>
+    <None Remove="*.abppkg" />
+    <Content Include="*.abppkg">
+      <Pack>true</Pack>
+      <PackagePath>content\</PackagePath>
+    </Content>
+  </ItemGroup>
 </Project>
 ```
 
@@ -218,17 +239,31 @@ This means any project matching the naming convention automatically gets Coverle
 
 ## `Directory.Packages.props` — centralized package management
 
-The root `Directory.Packages.props` currently opts **out** of Centralized Package Management (CPM):
+The root `Directory.Packages.props` enables Centralized Package Management (CPM) with floating versions:
 
-```xml title="Directory.Packages.props (root — applies to templates)"
+```xml title="Directory.Packages.props (root — applies to framework and modules)"
+<Project>
+  <PropertyGroup>
+    <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
+    <CentralPackageFloatingVersionsEnabled>true</CentralPackageFloatingVersionsEnabled>
+  </PropertyGroup>
+  <ItemGroup>
+    <!-- Hundreds of PackageVersion entries — one canonical version per dependency -->
+    <PackageVersion Include="Autofac" Version="9.1.0" />
+    <!-- ... -->
+  </ItemGroup>
+</Project>
+```
+
+Templates opt **out** of CPM via their own `templates/Directory.Packages.props`:
+
+```xml title="templates/Directory.Packages.props"
 <Project>
   <PropertyGroup>
     <ManagePackageVersionsCentrally>false</ManagePackageVersionsCentrally>
   </PropertyGroup>
 </Project>
 ```
-
-Individual solutions within `framework/` and `modules/` manage their own package versions via `PackageReference` version attributes. CPM (`ManagePackageVersionsCentrally=true`) is used selectively within sub-solutions that need it.
 
 ---
 
@@ -249,9 +284,9 @@ Only `nuget.org` is configured in the open-source repo. Commercial projects add 
 
 ## `.abppkg` — module package manifests
 
-Every non-web ABP package includes a `.abppkg` JSON manifest file:
+Every ABP package includes a `.abppkg` JSON manifest file that identifies its role:
 
-```json title="Example: Volo.Abp.AI.abppkg"
+```json title="Example: Volo.Abp.Caching.abppkg"
 {
   "role": "lib.framework"
 }
@@ -266,41 +301,31 @@ Common role values:
 | `app` | Host / startup project |
 | `module` | Reusable module package |
 
-These manifests are embedded into NuGet packages via `common.props`:
-
-```xml
-<ItemGroup>
-  <None Remove="*.abppkg" />
-  <Content Include="*.abppkg">
-    <Pack>true</Pack>
-    <PackagePath>content\</PackagePath>
-  </Content>
-</ItemGroup>
-```
+These manifests are embedded into NuGet packages via `common.props` (the unconditional `ItemGroup` — applies to all packages).
 
 ---
 
 ## `.abppkg.analyze.json` — analysis metadata
 
-A companion file that provides additional analysis hints to ABP tooling:
+A companion file that provides detailed module analysis metadata to ABP tooling (module dependencies, interfaces, content types). It is a richer JSON document than `.abppkg`:
 
-```json title="Example: Volo.Abp.ApiVersioning.Abstractions.abppkg.analyze.json"
+```json title="Example: Volo.Abp.Caching.abppkg.analyze.json (excerpt)"
 {
-  "role": "lib.framework"
+  "name": "Volo.Abp.Caching",
+  "hash": "",
+  "contents": [
+    {
+      "namespace": "Volo.Abp.Caching",
+      "dependsOnModules": [ ... ],
+      "implementingInterfaces": [ ... ],
+      "contentType": "abpModule",
+      "name": "AbpCachingModule"
+    }
+  ]
 }
 ```
 
-These files are also packed into NuGet packages (only for non-web/non-Razor projects):
-
-```xml
-<ItemGroup Condition="'$(UsingMicrosoftNETSdkWeb)' != 'true' AND '$(UsingMicrosoftNETSdkRazor)' != 'true'">
-  <None Remove="*.abppkg.analyze.json" />
-  <Content Include="*.abppkg.analyze.json">
-    <Pack>true</Pack>
-    <PackagePath>content\</PackagePath>
-  </Content>
-</ItemGroup>
-```
+These files are packed into NuGet packages only for non-web/non-Razor projects (the conditional `ItemGroup` in `common.props`).
 
 ---
 
@@ -316,7 +341,21 @@ Several ABP packages use [Fody](https://github.com/Fody/Fody) for post-compilati
 </Weavers>
 ```
 
-The `ConfigureAwait` weaver is the most common usage — it eliminates the need to write `.ConfigureAwait(false)` on every `await` in library code, which is important for avoiding deadlocks when ABP is consumed in synchronous ASP.NET contexts.
+The Fody packages are pulled in via `configureawait.props` (at the repo root) only during `Release` builds:
+
+```xml title="configureawait.props"
+<Project>
+  <ItemGroup Condition="'$(Configuration)' == 'Release'">
+    <PackageReference Include="ConfigureAwait.Fody" PrivateAssets="All" />
+    <PackageReference Include="Fody">
+      <PrivateAssets>All</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers</IncludeAssets>
+    </PackageReference>
+  </ItemGroup>
+</Project>
+```
+
+The `ConfigureAwait` weaver eliminates the need to write `.ConfigureAwait(false)` on every `await` in library code, which is important for avoiding deadlocks when ABP is consumed in synchronous ASP.NET contexts.
 
 ---
 

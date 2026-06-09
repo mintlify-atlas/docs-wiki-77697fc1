@@ -55,20 +55,25 @@ public class DefaultConventionalRegistrar : ConventionalRegistrarBase
         if (lifeTime == null)
             return;
 
-        var exposedServiceTypes = GetExposedKeyedServiceTypes(type)
+        var exposedServiceAndKeyedServiceTypes = GetExposedKeyedServiceTypes(type)
             .Concat(GetExposedServiceTypes(type).Select(t => new ServiceIdentifier(t)))
             .ToList();
 
-        TriggerServiceExposing(services, type, exposedServiceTypes);
+        TriggerServiceExposing(services, type, exposedServiceAndKeyedServiceTypes);
 
-        foreach (var exposedServiceType in exposedServiceTypes)
+        foreach (var exposedServiceType in exposedServiceAndKeyedServiceTypes)
         {
             var serviceDescriptor = CreateServiceDescriptor(
                 type, exposedServiceType.ServiceKey,
                 exposedServiceType.ServiceType,
-                exposedServiceTypes, lifeTime.Value);
+                exposedServiceAndKeyedServiceTypes, lifeTime.Value);
 
-            services.Add(serviceDescriptor);
+            if (dependencyAttribute?.ReplaceServices == true)
+                services.Replace(serviceDescriptor);
+            else if (dependencyAttribute?.TryRegister == true)
+                services.TryAdd(serviceDescriptor);
+            else
+                services.Add(serviceDescriptor);
         }
     }
 }
@@ -96,13 +101,24 @@ public static class ExposedServiceExplorer
 
     public static List<Type> GetExposedServices(Type type)
     {
-        var providers = type.GetCustomAttributes(true)
-            .OfType<IExposedServiceTypesProvider>().ToList();
+        var exposedServiceTypesProviders = type
+            .GetCustomAttributes(true)
+            .OfType<IExposedServiceTypesProvider>()
+            .ToList();
 
-        return providers
+        // If there are only keyed-service providers and no regular providers,
+        // do not expose default services.
+        if (exposedServiceTypesProviders.IsNullOrEmpty() &&
+            type.GetCustomAttributes(true).OfType<IExposedKeyedServiceTypesProvider>().Any())
+        {
+            return Array.Empty<Type>().ToList();
+        }
+
+        return exposedServiceTypesProviders
             .DefaultIfEmpty(DefaultExposeServicesAttribute)
             .SelectMany(p => p.GetExposedServiceTypes(type))
-            .Distinct().ToList();
+            .Distinct()
+            .ToList();
     }
 }
 ```
@@ -191,7 +207,7 @@ var myService = app.ServiceProvider.GetRequiredService<IMyService>();
 
 ABP ships a first-class Autofac adapter at `Volo/Abp/Autofac/AbpAutofacModule.cs`. Adding it enables:
 
-- **Property injection** — `AbpPropertySelector` marks properties decorated with `[Autowired]`
+- **Property injection** — `AbpPropertySelector` injects all public settable properties whose type is registered in the container, unless the property is marked with `[DisablePropertyInjection]`
 - **Castle DynamicProxy interceptors** — required for UoW, validation, and auditing cross-cutting concerns
 - **Named/keyed registrations** — Autofac's richer registration API is accessible via `ContainerBuilder`
 
@@ -211,7 +227,7 @@ Host.CreateDefaultBuilder(args)
     .Run();
 ```
 
-`UseAutofac()` calls `services.AddObjectAccessor<ContainerBuilder>()` and registers `AbpAutofacServiceProviderFactory`. You can access the raw `ContainerBuilder` via:
+`UseAutofac()` creates a `ContainerBuilder`, registers it as an object accessor in the service collection, and installs `AbpAutofacServiceProviderFactory`. You can access the raw `ContainerBuilder` via:
 
 ```csharp
 var builder = services.GetContainerBuilder();

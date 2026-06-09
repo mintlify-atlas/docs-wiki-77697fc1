@@ -187,14 +187,15 @@ The static proxy generator writes API metadata to a JSON file embedded inside th
 
 - **Path parameters** — substituted directly into the URL template (e.g., `{id}` → `Guid`).
 - **Query parameters** — appended as `?key=value` for GET/DELETE operations.
-- **Custom converters** — `AbpHttpClientProxyingOptions.ObjectToQueryStringContributors` let you register `IObjectToQueryString<T>` implementations for complex types.
+- **Custom converters** — `AbpHttpClientProxyingOptions.QueryStringConverts` maps complex types to `IObjectToQueryString<T>` implementations. Likewise `FormDataConverts` and `PathConverts` handle multipart and path-parameter conversions.
 
 ```csharp
-// fragment: ClientProxyUrlBuilder.cs
-public ClientProxyUrlBuilder(
-    IServiceScopeFactory serviceScopeFactory,
-    IOptions<AbpHttpClientProxyingOptions> httpClientProxyingOptions,
-    IClock clock)
+// Register a custom query-string converter for a complex filter type:
+Configure<AbpHttpClientProxyingOptions>(options =>
+{
+    options.QueryStringConverts[typeof(MyFilterInput)] =
+        typeof(MyFilterInputQueryStringConverter);
+});
 ```
 
 ## ClientProxyRequestPayloadBuilder

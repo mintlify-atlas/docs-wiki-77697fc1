@@ -256,16 +256,22 @@ public override async Task<string> ResolveAsync(string? connectionStringName = n
     }
 
     // Tenant has its own DB
-    var tenantDefault = tenant.ConnectionStrings?.Default;
-    if (connectionStringName == ConnectionStrings.DefaultConnectionStringName)
+    var tenantDefaultConnectionString = tenant.ConnectionStrings?.Default;
+    if (connectionStringName == null ||
+        connectionStringName == ConnectionStrings.DefaultConnectionStringName)
     {
-        return !tenantDefault.IsNullOrWhiteSpace()
-            ? tenantDefault!
+        return !tenantDefaultConnectionString.IsNullOrWhiteSpace()
+            ? tenantDefaultConnectionString!
             : Options.ConnectionStrings.Default!;
     }
 
-    var specific = tenant.ConnectionStrings?.GetOrDefault(connectionStringName);
-    return !specific.IsNullOrWhiteSpace() ? specific! : await base.ResolveAsync(connectionStringName);
+    var connString = tenant.ConnectionStrings?.GetOrDefault(connectionStringName);
+    if (!connString.IsNullOrWhiteSpace())
+    {
+        return connString!;
+    }
+
+    return await base.ResolveAsync(connectionStringName);
 }
 ```
 

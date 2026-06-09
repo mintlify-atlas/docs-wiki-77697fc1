@@ -303,7 +303,7 @@ options.Containers.ConfigureDefault(container =>
     ```
 
     ```csharp
-    [DependsOn(typeof(BlobStoringDatabaseModule))]
+    [DependsOn(typeof(BlobStoringDatabaseDomainModule))]
     public class MyModule : AbpModule { }
 
     container.UseDatabase();

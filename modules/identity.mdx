@@ -22,20 +22,24 @@ The Identity module provides user account management, role-based access control,
 
 ```
 modules/identity/src/
-├── Volo.Abp.Identity.Domain.Shared          # Consts, enums, ETO types
-├── Volo.Abp.Identity.Domain                 # IdentityUser, IdentityRole, OrgUnit, domain services
-├── Volo.Abp.Identity.Application.Contracts  # Interfaces, DTOs, permissions
-├── Volo.Abp.Identity.Application            # App service implementations
-├── Volo.Abp.Identity.HttpApi                # REST controller layer (auto-generated)
-├── Volo.Abp.Identity.HttpApi.Client         # Static HTTP client proxies
-├── Volo.Abp.Identity.EntityFrameworkCore    # EF Core DbContext, repositories
-├── Volo.Abp.Identity.MongoDB                # MongoDB repositories
-├── Volo.Abp.Identity.Web                    # Razor Pages UI
-├── Volo.Abp.Identity.Blazor                 # Blazor component set (shared)
-├── Volo.Abp.Identity.Blazor.Server          # Blazor Server variant
-├── Volo.Abp.Identity.Blazor.WebAssembly     # Blazor WASM variant
-├── Volo.Abp.Identity.Blazor.MudBlazor       # MudBlazor components
-└── Volo.Abp.Identity.AspNetCore             # SignIn manager, security stamp
+├── Volo.Abp.Identity.Domain.Shared                  # Consts, enums, ETO types
+├── Volo.Abp.Identity.Domain                         # IdentityUser, IdentityRole, OrgUnit, domain services
+├── Volo.Abp.Identity.Application.Contracts          # Interfaces, DTOs, permissions
+├── Volo.Abp.Identity.Application                    # App service implementations
+├── Volo.Abp.Identity.HttpApi                        # REST controller layer (auto-generated)
+├── Volo.Abp.Identity.HttpApi.Client                 # Static HTTP client proxies
+├── Volo.Abp.Identity.EntityFrameworkCore            # EF Core DbContext, repositories
+├── Volo.Abp.Identity.MongoDB                        # MongoDB repositories
+├── Volo.Abp.Identity.Web                            # Razor Pages UI
+├── Volo.Abp.Identity.Blazor                         # Blazor component set (shared)
+├── Volo.Abp.Identity.Blazor.Server                  # Blazor Server variant
+├── Volo.Abp.Identity.Blazor.WebAssembly             # Blazor WASM variant
+├── Volo.Abp.Identity.Blazor.MudBlazor               # MudBlazor components (shared)
+├── Volo.Abp.Identity.Blazor.MudBlazor.Server        # MudBlazor Server variant
+├── Volo.Abp.Identity.Blazor.MudBlazor.WebAssembly   # MudBlazor WASM variant
+├── Volo.Abp.Identity.AspNetCore                     # SignIn manager, security stamp
+├── Volo.Abp.Identity.Installer                      # ABP CLI installer metadata
+└── Volo.Abp.PermissionManagement.Domain.Identity    # Permission seeding for Identity
 ```
 
 ## Key domain entities
@@ -68,7 +72,7 @@ public class IdentityUser
 
 ### IdentityRole
 
-`IdentityRole` is a `FullAuditedAggregateRoot<Guid>` with `Name`, `NormalizedName`, `IsDefault`, and `IsPublic` properties. Roles marked `IsDefault` are automatically assigned to new users.
+`IdentityRole` is an `AggregateRoot<Guid>` (also implements `IMultiTenant`, `IHasEntityVersion`, and `IHasCreationTime`) with `Name`, `NormalizedName`, `IsDefault`, and `IsPublic` properties. Roles marked `IsDefault` are automatically assigned to new users.
 
 ### OrganizationUnit
 
@@ -132,13 +136,20 @@ public interface IIdentityRoleAppService
 
 ### IIdentityUserLookupAppService
 
-Lightweight interface for populating user-picker UI components:
+<Note>
+`IIdentityUserLookupAppService` is marked `[Obsolete]`. Use `IIdentityUserIntegrationService` for module-to-module or service-to-service user lookups instead.
+</Note>
+
+Lightweight interface originally used for populating user-picker UI components:
 
 ```csharp
+[Obsolete("Use IIdentityUserIntegrationService for module-to-module (or service-to-service) communication.")]
 public interface IIdentityUserLookupAppService : IApplicationService
 {
     Task<UserData> FindByIdAsync(Guid id);
     Task<UserData> FindByUserNameAsync(string userName);
+    Task<ListResultDto<UserData>> SearchAsync(UserLookupSearchInputDto input);
+    Task<long> GetCountAsync(UserLookupCountInputDto input);
 }
 ```
 
@@ -258,14 +269,18 @@ graph LR
 
 ## Data seeding
 
-`IdentityDataSeedContributor` creates an initial `admin` user and `admin` role when the database is seeded. The admin password comes from `IdentityDataSeedOptions.AdminPassword`. Override this in tests or CI:
+`IdentityDataSeedContributor` creates an initial `admin` user and `admin` role when the database is seeded. It reads seed values from `DataSeedContext` using the property-name constants defined on the contributor itself. Override them in tests or CI by populating the context before seeding:
 
 ```csharp
-Configure<IdentityDataSeedOptions>(options =>
-{
-    options.AdminEmail = "admin@example.com";
-    options.AdminPassword = "1q2w3E*";
-});
+// IdentityDataSeedContributor defines these constants:
+// AdminEmailPropertyName    = "AdminEmail"      default: "admin@abp.io"
+// AdminUserNamePropertyName = "AdminUserName"   default: "admin"
+// AdminPasswordPropertyName = "AdminPassword"   default: "1q2w3E*"
+
+var context = new DataSeedContext();
+context[IdentityDataSeedContributor.AdminEmailPropertyName]    = "admin@example.com";
+context[IdentityDataSeedContributor.AdminPasswordPropertyName] = "MyStr0ng!Pass";
+await dataSeeder.SeedAsync(context);
 ```
 
 ## See also

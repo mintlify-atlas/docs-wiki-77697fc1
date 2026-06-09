@@ -56,8 +56,7 @@ All properties are resolved lazily via `IAbpLazyServiceProvider` — the service
 | Property | Interface | Purpose |
 |---|---|---|
 | `Clock` | `IClock` | Time-zone–aware "now" that respects the ABP clock settings |
-| `GuidGenerator` | `IGuidGenerator` | Sequential GUID generation (`SequentialGuidGenerator` by default) |
-| `GuidGenerator` fallback | `SimpleGuidGenerator` | Used when no generator is registered (e.g., unit tests without full DI) |
+| `GuidGenerator` | `IGuidGenerator` | Sequential GUID generation; falls back to `SimpleGuidGenerator.Instance` when no generator is registered |
 | `CurrentTenant` | `ICurrentTenant` | Ambient tenant context for multi-tenant business rules |
 | `Logger` | `ILogger` | Category-named logger using the full type name |
 | `AsyncExecuter` | `IAsyncQueryableExecuter` | ORM-agnostic async LINQ execution |

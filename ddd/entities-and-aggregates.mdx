@@ -125,6 +125,14 @@ public abstract class AggregateRoot<TKey> : BasicAggregateRoot<TKey>,
         ExtraProperties = new ExtraPropertyDictionary();
         this.SetDefaultsForExtraProperties();
     }
+
+    protected AggregateRoot(TKey id)
+        : base(id)
+    {
+        ConcurrencyStamp = Guid.NewGuid().ToString("N");
+        ExtraProperties = new ExtraPropertyDictionary();
+        this.SetDefaultsForExtraProperties();
+    }
 }
 ```
 
@@ -151,13 +159,14 @@ graph TD
     FE["FullAuditedEntity&lt;TKey&gt;\n+ IsDeleted\n+ DeleterId\n+ DeletionTime"]
 
     BA["BasicAggregateRoot&lt;TKey&gt;\n(domain events)"]
+    AR["AggregateRoot&lt;TKey&gt;\n+ ConcurrencyStamp\n+ ExtraProperties"]
     CA["CreationAuditedAggregateRoot&lt;TKey&gt;"]
     AA["AuditedAggregateRoot&lt;TKey&gt;"]
     FA["FullAuditedAggregateRoot&lt;TKey&gt;"]
     FAU["FullAuditedAggregateRootWithUser&lt;TKey,TUser&gt;\n+ Creator\n+ LastModifier\n+ Deleter (navigation)"]
 
     E --> CE --> AE --> FE
-    BA --> CA --> AA --> FA --> FAU
+    BA --> AR --> CA --> AA --> FA --> FAU
 ```
 
 ### `CreationAuditedEntity<TKey>`

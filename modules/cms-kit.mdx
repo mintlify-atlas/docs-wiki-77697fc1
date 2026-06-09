@@ -86,31 +86,35 @@ GlobalFeatureManager.Instance.Modules()
         kit.Reactions.Enable();
         kit.Ratings.Enable();
         kit.Tags.Enable();
-        kit.Menus.Enable();
+        kit.Menu.Enable();
         kit.Media.Enable();
-        kit.MarkedItemsFeature.Enable();
+        kit.User.Enable();
         kit.GlobalResources.Enable();
+        kit.BlogPostScrollIndex.Enable();
+        kit.MarkedItemsFeature.Enable();
     });
 ```
 
 `GlobalCmsKitFeatures` is the type-safe accessor:
 
 ```csharp
-// modules/cms-kit/src/Volo.CmsKit.Domain.Shared/.../GlobalCmsKitFeatures.cs
+// modules/cms-kit/src/Volo.CmsKit.Domain.Shared/Volo/CmsKit/GlobalFeatures/GlobalCmsKitFeatures.cs
 public class GlobalCmsKitFeatures : GlobalModuleFeatures
 {
     public const string ModuleName = "CmsKit";
 
-    public ReactionsFeature Reactions => GetFeature<ReactionsFeature>();
-    public CommentsFeature Comments   => GetFeature<CommentsFeature>();
-    public MediaFeature Media         => GetFeature<MediaFeature>();
-    public RatingsFeature Ratings     => GetFeature<RatingsFeature>();
-    public TagsFeature Tags           => GetFeature<TagsFeature>();
-    public PagesFeature Pages         => GetFeature<PagesFeature>();
-    public BlogsFeature Blogs         => GetFeature<BlogsFeature>();
-    public MenuFeature Menu           => GetFeature<MenuFeature>();
-    public GlobalResourcesFeature GlobalResources => GetFeature<GlobalResourcesFeature>();
-    public MarkedItemsFeature MarkedItemsFeature  => GetFeature<MarkedItemsFeature>();
+    public ReactionsFeature Reactions               => GetFeature<ReactionsFeature>();
+    public CommentsFeature Comments                 => GetFeature<CommentsFeature>();
+    public MediaFeature Media                       => GetFeature<MediaFeature>();
+    public RatingsFeature Ratings                   => GetFeature<RatingsFeature>();
+    public TagsFeature Tags                         => GetFeature<TagsFeature>();
+    public PagesFeature Pages                       => GetFeature<PagesFeature>();
+    public BlogsFeature Blogs                       => GetFeature<BlogsFeature>();
+    public CmsUserFeature User                      => GetFeature<CmsUserFeature>();
+    public MenuFeature Menu                         => GetFeature<MenuFeature>();
+    public GlobalResourcesFeature GlobalResources   => GetFeature<GlobalResourcesFeature>();
+    public BlogPostScrollIndexFeature BlogPostScrollIndex => GetFeature<BlogPostScrollIndexFeature>();
+    public MarkedItemsFeature MarkedItemsFeature    => GetFeature<MarkedItemsFeature>();
 }
 ```
 

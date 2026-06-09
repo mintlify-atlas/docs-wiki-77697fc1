@@ -70,7 +70,7 @@ public class DataFilter : IDataFilter, ISingletonDependency
 
     private IDataFilter<TFilter> GetFilter<TFilter>() where TFilter : class
         => (_filters.GetOrAdd(typeof(TFilter),
-            _ => _serviceProvider.GetRequiredService<IDataFilter<TFilter>>())
+            factory: () => _serviceProvider.GetRequiredService<IDataFilter<TFilter>>())
            as IDataFilter<TFilter>)!;
 }
 ```
@@ -191,7 +191,7 @@ Expression<Func<TEntity, bool>> softDeleteFilter =
 // IMultiTenant filter
 Expression<Func<TEntity, bool>> multiTenantFilter =
     e => !IsMultiTenantFilterEnabled
-         || EF.Property<Guid?>(e, multiTenantPropertyName) == CurrentTenantId;
+         || EF.Property<Guid>(e, multiTenantPropertyName) == CurrentTenantId;
 ```
 
 These two filters are combined with `And` when both interfaces are implemented, and attached via `entityTypeBuilder.HasAbpQueryFilter(filterExpression)`.

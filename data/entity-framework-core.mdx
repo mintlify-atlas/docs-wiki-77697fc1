@@ -40,10 +40,10 @@ The module pre-configures `AbpDbContextOptions` to suppress the `LazyLoadOnDispo
 
 **File:** `Volo/Abp/EntityFrameworkCore/AbpDbContext.cs`
 
-`AbpDbContext<TDbContext>` extends `Microsoft.EntityFrameworkCore.DbContext` and implements `IAbpEfCoreDbContext`. Every ABP application database context inherits from it:
+`AbpDbContext<TDbContext>` extends `Microsoft.EntityFrameworkCore.DbContext` and implements `IAbpEfCoreDbContext` and `IAbpEfCoreDbFunctionContext`. Every ABP application database context inherits from it:
 
 ```csharp
-public abstract class AbpDbContext<TDbContext> : DbContext, IAbpEfCoreDbContext, ITransientDependency
+public abstract class AbpDbContext<TDbContext> : DbContext, IAbpEfCoreDbContext, IAbpEfCoreDbFunctionContext, ITransientDependency
     where TDbContext : DbContext
 {
     public IAbpLazyServiceProvider LazyServiceProvider { get; set; } = default!;
@@ -79,7 +79,7 @@ Expression<Func<TEntity, bool>> multiTenantFilter =
          || EF.Property<Guid>(e, multiTenantPropertyName) == CurrentTenantId;
 ```
 
-The evaluated values (`IsSoftDeleteFilterEnabled`, `IsMultiTentFilterEnabled`, `CurrentTenantId`) are instance properties, so EF Core re-evaluates them on every query — enabling per-request filter toggling via `IDataFilter`.
+The evaluated values (`IsSoftDeleteFilterEnabled`, `IsMultiTenantFilterEnabled`, `CurrentTenantId`) are instance properties, so EF Core re-evaluates them on every query — enabling per-request filter toggling via `IDataFilter`.
 
 <Note>
 ABP also supports a DB-function-based filter mode (`AbpEfCoreGlobalFilterOptions.UseDbFunction = true`) for databases that benefit from stable query plans.
@@ -161,7 +161,9 @@ public class EfCoreRepository<TDbContext, TEntity> : RepositoryBase<TEntity>, IE
     }
 
     protected async Task<DbSet<TEntity>> GetDbSetAsync()
-        => (await GetDbContextAsync()).Set<TEntity>();
+    {
+        return (await GetDbContextAsync()).Set<TEntity>();
+    }
 }
 ```
 
@@ -177,6 +179,12 @@ Always use `GetDbContextAsync()` and `GetDbSetAsync()` in custom repositories. T
 public interface IEfCoreRepository<TEntity> : IRepository<TEntity>
     where TEntity : class, IEntity
 {
+    [Obsolete("Use GetDbContextAsync() method.")]
+    DbContext DbContext { get; }
+
+    [Obsolete("Use GetDbSetAsync() method.")]
+    DbSet<TEntity> DbSet { get; }
+
     Task<DbContext> GetDbContextAsync();
     Task<DbSet<TEntity>> GetDbSetAsync();
 }

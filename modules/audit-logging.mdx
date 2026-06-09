@@ -28,7 +28,8 @@ modules/audit-logging/src/
 ├── Volo.Abp.AuditLogging.Domain.Shared          # Consts, localization resource, extension config
 ├── Volo.Abp.AuditLogging.Domain                 # AuditLog entity, AuditingStore, IAuditLogRepository
 ├── Volo.Abp.AuditLogging.EntityFrameworkCore    # EF Core DbContext and repository
-└── Volo.Abp.AuditLogging.MongoDB                # MongoDB collection and repository
+├── Volo.Abp.AuditLogging.MongoDB                # MongoDB collection and repository
+└── Volo.Abp.AuditLogging.Installer             # ABP CLI installer metadata
 ```
 
 <Note>
@@ -72,16 +73,18 @@ public class AuditingStore : IAuditingStore, ITransientDependency
         }
         catch (Exception ex)
         {
-            Logger.LogWarning("Could not save audit log! " + ex.Message);
+            Logger.LogWarning("Could not save the audit log object: " + Environment.NewLine + auditInfo.ToString());
+            Logger.LogException(ex, LogLevel.Error);
         }
     }
 
-    private async Task SaveLogAsync(AuditLogInfo auditInfo)
+    protected virtual async Task SaveLogAsync(AuditLogInfo auditInfo)
     {
-        using var uow = UnitOfWorkManager.Begin(requiresNew: true, isTransactional: false);
-        var auditLog = await Converter.ConvertAsync(auditInfo);
-        await AuditLogRepository.InsertAsync(auditLog);
-        await uow.CompleteAsync();
+        using (var uow = UnitOfWorkManager.Begin(requiresNew: true))
+        {
+            await AuditLogRepository.InsertAsync(await Converter.ConvertAsync(auditInfo));
+            await uow.CompleteAsync();
+        }
     }
 }
 ```

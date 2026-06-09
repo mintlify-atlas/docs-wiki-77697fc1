@@ -143,22 +143,29 @@ public override void ConfigureServices(ServiceConfigurationContext context)
 
 public static void ReplaceEmbeddedByPhysical<T>(
     this VirtualFileSetList fileSets,
+    string physicalPath)
+{
+    ReplaceEmbeddedByPhysical<T>(fileSets, physicalPath, ExclusionFilters.Sensitive);
+}
+
+public static void ReplaceEmbeddedByPhysical<T>(
+    this VirtualFileSetList fileSets,
     string physicalPath,
-    ExclusionFilters exclusionFilters = ExclusionFilters.Sensitive)
+    ExclusionFilters exclusionFilters)
 {
     var assembly = typeof(T).Assembly;
 
     for (var i = 0; i < fileSets.Count; i++)
     {
-        if (fileSets[i] is EmbeddedVirtualFileSetInfo embedded &&
-            embedded.Assembly == assembly)
+        if (fileSets[i] is EmbeddedVirtualFileSetInfo embeddedVirtualFileSet &&
+            embeddedVirtualFileSet.Assembly == assembly)
         {
-            var path = physicalPath;
-            if (!embedded.BaseFolder.IsNullOrEmpty())
-                path = Path.Combine(path, embedded.BaseFolder!);
+            var thisPath = physicalPath;
+            if (!embeddedVirtualFileSet.BaseFolder.IsNullOrEmpty())
+                thisPath = Path.Combine(thisPath, embeddedVirtualFileSet.BaseFolder!);
 
             fileSets[i] = new PhysicalVirtualFileSetInfo(
-                new PhysicalFileProvider(path, exclusionFilters), path);
+                new PhysicalFileProvider(thisPath, exclusionFilters), thisPath);
         }
     }
 }

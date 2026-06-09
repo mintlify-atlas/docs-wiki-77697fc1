@@ -248,12 +248,17 @@ sequenceDiagram
 
 ## Token cleanup background worker
 
-`AbpOpenIddictDomainModule` registers a background worker that periodically prunes expired tokens and authorizations from the store. The interval is configurable via `AbpOpenIddictStoreOptions`:
+`AbpOpenIddictDomainModule` registers a background worker that periodically prunes expired tokens and authorizations from the store. The isolation levels used during prune and delete operations are configurable via `AbpOpenIddictStoreOptions`:
 
 ```csharp
+// modules/openiddict/src/.../AbpOpenIddictStoreOptions.cs
 Configure<AbpOpenIddictStoreOptions>(options =>
 {
-    options.CleanupLoopDelay = TimeSpan.FromMinutes(30);
+    // Default: IsolationLevel.RepeatableRead
+    options.PruneIsolationLevel = System.Data.IsolationLevel.ReadCommitted;
+
+    // Default: IsolationLevel.Serializable
+    options.DeleteIsolationLevel = System.Data.IsolationLevel.RepeatableRead;
 });
 ```
 

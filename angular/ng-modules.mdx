@@ -1,13 +1,13 @@
 ---
 title: "ABP Angular Package Ecosystem — All ng-packs"
 sidebarTitle: "ng-packs"
-description: "Catalogue of every @abp/ng.* and @abp/nx.* package in the Lerna monorepo: purpose, dependencies, and integration guidance."
+description: "Catalogue of every @abp/ng.* and @abp/nx.* package in the Nx monorepo: purpose, dependencies, and integration guidance."
 ---
 
-ABP's Angular UI is distributed as a Lerna-managed monorepo under `npm/ng-packs/packages/`. Each package maps to a server-side ABP module and is published independently to npm under the `@abp` scope. All packages share the same version number and are released together.
+ABP's Angular UI is distributed as an Nx-managed monorepo under `npm/ng-packs/packages/`. Each package maps to a server-side ABP module and is published independently to npm under the `@abp` scope. All packages share the same version number and are released together.
 
 <Note>
-  The source for every package is at `npm/ng-packs/packages/<name>/`. Run `yarn` at the monorepo root to install; individual packages are linked by Lerna's local-resolution.
+  The source for every package is at `npm/ng-packs/packages/<name>/`. Run `yarn` at the monorepo root to install; individual packages are linked by Nx's local-resolution.
 </Note>
 
 ---
@@ -67,6 +67,7 @@ Implements OpenID Connect and OAuth 2.0 flows using `angular-oauth2-oidc` (^20.0
   "name": "@abp/ng.oauth",
   "dependencies": {
     "@abp/ng.core": "~10.5.0-rc.1",
+    "@abp/utils": "~10.5.0-rc.1",
     "angular-oauth2-oidc": "^20.0.0"
   }
 }
@@ -85,10 +86,12 @@ The theming foundation for all ABP Angular UIs. Provides Bootstrap 5, ng-bootstr
   "name": "@abp/ng.theme.shared",
   "dependencies": {
     "@abp/ng.core": "~10.5.0-rc.1",
+    "@fortawesome/fontawesome-free": "^6.0.0",
     "@ng-bootstrap/ng-bootstrap": "~20.0.0",
+    "@ngx-validate/core": "^0.2.0",
+    "@popperjs/core": "~2.11.0",
     "@swimlane/ngx-datatable": "~22.0.0",
-    "bootstrap": "^5.0.0",
-    "@fortawesome/fontawesome-free": "^6.0.0"
+    "bootstrap": "^5.0.0"
   }
 }
 ```
@@ -324,15 +327,16 @@ npm/ng-packs/
 │   ├── cms-kit/
 │   ├── generators/        # @abp/nx.generators
 │   └── schematics/        # @abp/ng.schematics
-├── publish-ng.ps1         # Lerna publish script
-└── lerna.json
+├── publish-ng.ps1         # Angular publish script
+├── lerna.version.json     # Lerna versioning config
+└── lerna.publish.json     # Lerna publish config
 ```
 
-Lerna manages cross-package version bumping. `publish-ng.ps1` calls:
+`publish-ng.ps1` orchestrates the release:
 
 ```powershell
 yarn update-version $Version
-npm run publish-packages -- --nextVersion $Version --registry $Registry
+npm run publish-packages -- --nextVersion $Version --skipGit --registry $Registry --skipVersionValidation
 ```
 
 ---

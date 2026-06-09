@@ -189,22 +189,23 @@ public interface IBackgroundJobStore
 protected override async Task DoWorkAsync(PeriodicBackgroundWorkerContext workerContext)
 {
     // Acquire distributed lock to prevent multi-node double-execution
-    await using (var handle = await DistributedLock.TryAcquireAsync(
+    await using (var handler = await DistributedLock.TryAcquireAsync(
         WorkerOptions.DistributedLockName))
     {
-        if (handle == null) return; // another node is processing
-
-        var store = workerContext.ServiceProvider
-            .GetRequiredService<IBackgroundJobStore>();
-
-        var waitingJobs = await store.GetWaitingJobsAsync(
-            WorkerOptions.ApplicationName,
-            WorkerOptions.MaxJobFetchCount);
-
-        foreach (var jobInfo in waitingJobs)
+        if (handler != null)
         {
-            jobInfo.TryCount++;
-            // Execute → delete on success, update NextTryTime on failure
+            var store = workerContext.ServiceProvider
+                .GetRequiredService<IBackgroundJobStore>();
+
+            var waitingJobs = await store.GetWaitingJobsAsync(
+                WorkerOptions.ApplicationName,
+                WorkerOptions.MaxJobFetchCount);
+
+            foreach (var jobInfo in waitingJobs)
+            {
+                jobInfo.TryCount++;
+                // Execute → delete on success, update NextTryTime on failure
+            }
         }
     }
 }
@@ -274,7 +275,7 @@ Set `ApplicationName` when multiple ABP applications share the same database. Th
     ```
 
     ```csharp
-    [DependsOn(typeof(AbpHangfireModule))]
+    [DependsOn(typeof(AbpBackgroundJobsHangfireModule))]
     public class MyModule : AbpModule
     {
         public override void ConfigureServices(ServiceConfigurationContext context)
@@ -297,7 +298,7 @@ Set `ApplicationName` when multiple ABP applications share the same database. Th
     ```
 
     ```csharp
-    [DependsOn(typeof(AbpQuartzModule))]
+    [DependsOn(typeof(AbpBackgroundJobsQuartzModule))]
     public class MyModule : AbpModule
     {
         public override void ConfigureServices(ServiceConfigurationContext context)
@@ -316,20 +317,27 @@ Set `ApplicationName` when multiple ABP applications share the same database. Th
     ```
   </Tab>
   <Tab title="TickerQ (Recurring)">
-    `Volo.Abp.TickerQ` adds first-class recurring-job support with cron expressions via `ITickerQManager`.
+    `Volo.Abp.BackgroundJobs.TickerQ` integrates TickerQ with ABP's standard `IBackgroundJobManager` API, providing improved job scheduling via TickerQ's task runner.
 
     ```bash
-    dotnet add package Volo.Abp.TickerQ
+    dotnet add package Volo.Abp.BackgroundJobs.TickerQ
     ```
 
     ```csharp
-    [DependsOn(typeof(AbpTickerQModule))]
+    [DependsOn(typeof(AbpBackgroundJobsTickerQModule))]
     public class MyModule : AbpModule { }
 
-    // Define a recurring job
-    public class DailyReportJob : ITickerQJob, ITransientDependency
+    // Define a job using the standard IBackgroundJob<TArgs> interface
+    public class DailyReportArgs
     {
-        public async Task ExecuteAsync(TickerQJobExecutionContext context)
+        public string ReportType { get; set; } = default!;
+    }
+
+    public class DailyReportJob
+        : AsyncBackgroundJob<DailyReportArgs>,
+          ITransientDependency
+    {
+        public override async Task ExecuteAsync(DailyReportArgs args)
         {
             // generate report
         }

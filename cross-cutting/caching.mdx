@@ -272,11 +272,11 @@ Configure<AbpHybridCacheOptions>(options =>
 
 ## Redis Integration
 
-Add `Volo.Abp.Caching.StackExchangeRedis` and depend on `AbpStackExchangeRedisCacheModule`:
+Add `Volo.Abp.Caching.StackExchangeRedis` and depend on `AbpCachingStackExchangeRedisModule`:
 
 ```csharp
 // Module dependency:
-[DependsOn(typeof(AbpStackExchangeRedisCacheModule))]
+[DependsOn(typeof(AbpCachingStackExchangeRedisModule))]
 public class MyModule : AbpModule { }
 
 // appsettings.json:

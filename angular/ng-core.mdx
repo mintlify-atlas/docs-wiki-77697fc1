@@ -218,6 +218,7 @@ export interface IAuthService {
   logout(queryParams?: Params): Observable<any>;
   navigateToLogin(queryParams?: Params): void;
   loginUsingGrant(grantType: string, parameters: object, headers?: HttpHeaders): Promise<AbpAuthResponse>;
+  getAccessTokenExpiration(): number;
   getAccessToken(): string;
   getRefreshToken(): string;
   refreshToken(): Promise<AbpAuthResponse | void>;
@@ -231,6 +232,7 @@ export interface IAuthService {
   "name": "@abp/ng.oauth",
   "dependencies": {
     "@abp/ng.core": "~10.5.0-rc.1",
+    "@abp/utils": "~10.5.0-rc.1",
     "angular-oauth2-oidc": "^20.0.0"
   }
 }
@@ -297,9 +299,9 @@ sequenceDiagram
 |---|---|---|
 | `APP_INIT_ERROR_HANDLERS` | `[]` | Functions called when `APP_INITIALIZER` throws |
 | `INCUDE_LOCALIZATION_RESOURCES_TOKEN` | `false` | Fetches full localization in the config call |
-| `PIPE_TO_LOGIN` | `true` | Redirects to login on 401 |
-| `TENANT_KEY` | `'__tenant'` | Cookie / query param name for current tenant |
-| `COOKIE_LANGUAGE_KEY` | `'Abp.Localization.CultureName'` | Cookie holding the selected language |
+| `PIPE_TO_LOGIN_FN_KEY` | — | Custom function called to redirect on 401 |
+| `TENANT_KEY` | — | Cookie / query param name for current tenant |
+| `COOKIE_LANGUAGE_KEY` | `'.AspNetCore.Culture'` | Cookie holding the selected language |
 | `DYNAMIC_LAYOUTS_TOKEN` | `Map` | Maps layout names to component paths |
 
 ---

@@ -100,6 +100,9 @@ public class TemplateDefinition : IHasNameWithLocalizableDisplayName
     // true → single file contains all cultures (e.g., {{if culture == "en"}})
     public bool IsInlineLocalized { get; set; }
 
+    // Default culture when no culture-specific file exists
+    public string? DefaultCultureName { get; }
+
     // "Scriban", "Razor", or custom engine key
     public string? RenderEngine { get; set; }
 
@@ -135,11 +138,11 @@ public class MyTemplateDefinitionProvider : TemplateDefinitionProvider
         context.Add(
             new TemplateDefinition(
                 name: "WelcomeEmail",
-                localizationResource: typeof(MyResource)
+                localizationResource: typeof(MyResource),
+                layout: "EmailLayout"
             )
             .WithRenderEngine(ScribanTemplateRenderingEngine.EngineName)
             .WithVirtualFilePath("/MyApp/Templates/WelcomeEmail", isInlineLocalized: false)
-            .WithLayout("EmailLayout")
         );
     }
 }
@@ -199,6 +202,11 @@ public virtual async Task<string> RenderAsync(
         ?? Options.DefaultRenderingEngine;
 
     var providerType = Options.RenderingEngines.GetOrDefault(renderEngine!);
+
+    if (providerType == null || !typeof(ITemplateRenderingEngine).IsAssignableFrom(providerType))
+    {
+        throw new AbpException("There is no rendering engine found with template name: " + templateName);
+    }
 
     using (var scope = ServiceScopeFactory.CreateScope())
     {
@@ -261,7 +269,7 @@ public virtual async Task<string> RenderAsync(
     public class MyModule : AbpModule { }
     ```
 
-    Engine key: `"Razor"` (`AbpRazorTemplateConsts.EngineName`)
+    Engine key: `"Razor"` (`RazorTemplateRenderingEngine.EngineName`)
 
     Example template (`Invoice.cshtml`):
 

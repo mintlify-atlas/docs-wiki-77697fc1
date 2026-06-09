@@ -9,8 +9,8 @@ Application services sit at the boundary between the domain model and external c
 ## `IApplicationService` Marker Interface
 
 ```csharp
-// Volo/Abp/Application/Services/IApplicationService.cs
-public interface IApplicationService { }
+// Volo.Abp.Ddd.Application.Contracts — Volo/Abp/Application/Services/IApplicationService.cs
+public interface IApplicationService : IRemoteService { }
 ```
 
 This interface is the contract that the conventional controller generator (`AbpServiceConventionOptions`) uses to discover application services and expose them as HTTP API controllers automatically. Any class implementing `IApplicationService` can be routed without a manually written controller.
@@ -33,9 +33,11 @@ public abstract class ApplicationService :
     public IAbpLazyServiceProvider LazyServiceProvider { get; set; } = default!;
 
     protected IUnitOfWorkManager UnitOfWorkManager { get; }
+    protected IAsyncQueryableExecuter AsyncExecuter { get; }
     protected IObjectMapper ObjectMapper { get; }
     protected IGuidGenerator GuidGenerator { get; }
     protected ICurrentTenant CurrentTenant { get; }
+    protected IDataFilter DataFilter { get; }
     protected ICurrentUser CurrentUser { get; }
     protected IAuthorizationService AuthorizationService { get; }
     protected ISettingProvider SettingProvider { get; }

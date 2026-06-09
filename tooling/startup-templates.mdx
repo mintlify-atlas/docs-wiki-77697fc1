@@ -152,7 +152,8 @@ templates/module/aspnet-core/
 ├── test/
 ├── database/
 ├── docker-compose.yml
-└── MyCompanyName.MyProjectName.abpmdl  # Module descriptor
+├── MyCompanyName.MyProjectName.abpmdl  # Module descriptor
+└── MyCompanyName.MyProjectName.abpsln  # ABP solution descriptor
 ```
 
 The `.abpmdl` and `.abpsln` files are ABP-specific solution descriptors used by the CLI and ABP Studio.
@@ -201,26 +202,26 @@ WPF desktop application with ABP DI and module system. Generated only on Windows
 
 ## Template versioning — `Directory.Packages.props`
 
-Each template folder contains a `Directory.Packages.props` (or inherits from the repo root). In templates:
+The `templates/Directory.Packages.props` opts **out** of Centralized Package Management so template `.csproj` files manage their own versions:
 
 ```xml title="templates/Directory.Packages.props"
 <Project>
   <PropertyGroup>
-    <!-- Disables CPM — templates pin versions in individual .csproj files -->
+    <!-- Templates manage their own package versions per .csproj -->
     <ManagePackageVersionsCentrally>false</ManagePackageVersionsCentrally>
   </PropertyGroup>
 </Project>
 ```
 
-Template `.csproj` files reference ABP packages with version variables that the CLI substitutes at project creation time (replacing `__version__` placeholders with the target ABP version).
-
-Individual template solution files pin `common.props`:
+Each template's `common.props` carries a placeholder `Version` that the CLI substitutes at project creation time:
 
 ```xml title="templates/app/aspnet-core/common.props"
 <Project>
   <PropertyGroup>
-    <AbpVersion>10.6.0-preview</AbpVersion>
-    <!-- Used by all .csproj files in the template -->
+    <LangVersion>latest</LangVersion>
+    <Version>1.0.0</Version>
+    <!-- Version is replaced by the CLI with the target ABP version -->
+    <AbpProjectType>app</AbpProjectType>
   </PropertyGroup>
 </Project>
 ```
@@ -232,7 +233,7 @@ Individual template solution files pin `common.props`:
 Templates are zipped for distribution by `templates/zip-templates.ps1`:
 
 ```powershell title="templates/zip-templates.ps1"
-param([string]$version)
+$version = $args[0]
 $folders = Get-ChildItem -Directory
 
 foreach ($folder in $folders) {
@@ -257,10 +258,16 @@ Templates are included in the full (`-f`) build pass. `build/common.ps1` adds te
 ```powershell title="build/common.ps1 — full build paths"
 if ($full -eq "-f") {
     $solutionPaths += (
+        "../modules/client-simulation",
+        "../modules/virtual-file-explorer",
+        "../modules/docs",
+        "../modules/blogging",
         "../templates/module/aspnet-core",
         "../templates/app/aspnet-core",
         "../templates/console",
-        "../templates/app-nolayers/aspnet-core"
+        "../templates/app-nolayers/aspnet-core",
+        "../abp_io/AbpIoLocalization",
+        "../source-code"
         # + wpf on Windows only
     )
 }

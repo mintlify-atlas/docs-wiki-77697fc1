@@ -38,6 +38,8 @@ graph TD
 
 ```csharp
 // framework/src/Volo.Abp.AspNetCore.Bundling/Volo/Abp/AspNetCore/Bundling/IBundleManager.cs
+namespace Volo.Abp.AspNetCore.Bundling;
+
 public interface IBundleManager
 {
     Task<IReadOnlyList<BundleFile>> GetStyleBundleFilesAsync(string bundleName);
@@ -48,7 +50,7 @@ public interface IBundleManager
 `BundleManager` (the MVC-specific implementation in `Volo.Abp.AspNetCore.Mvc.UI.Bundling`) extends `BundleManagerBase` and adds:
 
 - **Request-scoped deduplication** via `IWebRequestResources`, ensuring a file requested multiple times in a page renders only one `<script>`/`<link>` tag.
-- **Environment-aware file serving**: in `Development` mode, each file is served individually; in production, a single hashed bundle URL is emitted.
+- **Mode-aware file serving**: in `BundlingMode.None` (Development default), each file is served individually; in `BundlingMode.BundleAndMinify` (Production default), a single hashed bundle URL is emitted.
 
 ## IBundleContributor
 
@@ -63,12 +65,11 @@ public class MyModuleScriptContributor : BundleContributor
         context.Files.AddIfNotContains("/libs/my-module/my-module.js");
     }
 
-    public override Task ConfigureDynamicResourcesAsync(
-        BundleConfigurationContext context)
+    public override void ConfigureDynamicResources(BundleConfigurationContext context)
     {
-        // Emit inline dynamic content (e.g., localisation JSON)
-        context.DynamicResources.Add(new MyDynamicScriptResource());
-        return Task.CompletedTask;
+        // Add dynamically generated script files (e.g., inline localisation)
+        // Use context.Files.Add(new BundleFile(...)) with a dynamic file provider
+        // or resolve services via context.ServiceProvider.
     }
 }
 ```
@@ -138,25 +139,37 @@ Configure<AbpBundlingOptions>(options =>
 
 ## AbpBundlingOptions
 
-`AbpBundlingOptions` is the central configuration object. It lives in `Volo.Abp.AspNetCore.Bundling`:
+`AbpBundlingOptions` is the central configuration object. It lives in `Volo.Abp.AspNetCore.Mvc.UI.Bundling`:
 
 ```csharp
 // Key members (simplified)
+// framework/src/Volo.Abp.AspNetCore.Mvc.UI.Bundling.Abstractions/.../AbpBundlingOptions.cs
 public class AbpBundlingOptions
 {
     public BundleConfigurationCollection StyleBundles { get; }
     public BundleConfigurationCollection ScriptBundles { get; }
-    public bool? IsMinificationEnabled { get; set; }
-    // null → read from environment (true in Production)
+
+    /// <summary>
+    /// Default: Auto (None in Development, BundleAndMinify in Production).
+    /// </summary>
+    public BundlingMode Mode { get; set; } = BundlingMode.Auto;
+
+    public HashSet<string> MinificationIgnoredFiles { get; }
+    public bool DeferScriptsByDefault { get; set; }
+    public List<string> DeferScripts { get; }
+    public bool PreloadStylesByDefault { get; set; }
+    public List<string> PreloadStyles { get; }
 }
 ```
 
+`BundlingMode` values: `None` (no bundling or minification), `Auto` (environment-based), `Bundle` (bundled but not minified), `BundleAndMinify`.
+
 <Tip>
-Override minification explicitly when debugging a production deployment:
+Override the bundling mode when debugging a production deployment:
 ```csharp
 Configure<AbpBundlingOptions>(options =>
 {
-    options.IsMinificationEnabled = false;
+    options.Mode = BundlingMode.None;
 });
 ```
 </Tip>
@@ -256,7 +269,7 @@ Configure<AbpBundlingOptions>(options =>
 In Production, the bundle manager serialises the concatenated and minified content to a dynamic file served at a content-hash URL. The hash changes whenever any contributing file changes, providing automatic cache busting. The `CachedBundleDynamicFileProvider` in `Volo.Abp.AspNetCore.Mvc.UI.Bundling` stores bundles in memory between requests.
 
 <Note>
-CDN integration: configure `AbpBundlingOptions.BundleCdnUrl` to prepend a CDN base URL to all bundle `<src>` attributes, enabling edge-caching of static assets.
+CDN integration: configure `AbpBundlingOptions.Parameters` or use a custom `IBundleContributor` to rewrite resource URLs when serving assets from a CDN.
 </Note>
 
 ## See also

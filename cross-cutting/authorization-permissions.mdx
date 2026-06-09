@@ -107,19 +107,26 @@ public class PermissionChecker : IPermissionChecker, ITransientDependency
         if (!await StateCheckerManager.IsEnabledAsync(permission)) return false;
 
         // Walk the provider chain
+        var isGranted = false;
         var context = new PermissionValueCheckContext(permission, claimsPrincipal);
         foreach (var provider in PermissionValueProviderManager.ValueProviders)
         {
             var result = await provider.CheckAsync(context);
-            if (result == PermissionGrantResult.Granted)   return true;
-            if (result == PermissionGrantResult.Prohibited) return false;
+            if (result == PermissionGrantResult.Granted)
+            {
+                isGranted = true;
+            }
+            else if (result == PermissionGrantResult.Prohibited)
+            {
+                return false;
+            }
         }
-        return false;
+        return isGranted;
     }
 }
 ```
 
-`IsGrantedAsync` short-circuits on the first `Granted` or `Prohibited` result. `Undefined` means the provider abstains and the chain continues.
+`IsGrantedAsync` accumulates grants — once any provider returns `Granted` the flag is set, but the loop continues so that a later `Prohibited` can still override. `Undefined` means the provider abstains and the chain continues.
 
 ## Permission Value Provider Chain
 
@@ -178,7 +185,13 @@ flowchart LR
 ```csharp
 public class AuthorizationInterceptor : AbpInterceptor, ITransientDependency
 {
-    private readonly IMethodInvocationAuthorizationService _authService;
+    private readonly IMethodInvocationAuthorizationService _methodInvocationAuthorizationService;
+
+    public AuthorizationInterceptor(
+        IMethodInvocationAuthorizationService methodInvocationAuthorizationService)
+    {
+        _methodInvocationAuthorizationService = methodInvocationAuthorizationService;
+    }
 
     public override async Task InterceptAsync(IAbpMethodInvocation invocation)
     {
@@ -188,7 +201,7 @@ public class AuthorizationInterceptor : AbpInterceptor, ITransientDependency
 
     protected virtual async Task AuthorizeAsync(IAbpMethodInvocation invocation)
     {
-        await _authService.CheckAsync(
+        await _methodInvocationAuthorizationService.CheckAsync(
             new MethodInvocationAuthorizationContext(invocation.Method));
     }
 }
@@ -258,7 +271,7 @@ await _authorizationService.CheckAsync(BookStorePermissions.Books.Edit);
 `[Authorize]` on a non-virtual method in a class registered as a transient/scoped service will **not** be intercepted by `AuthorizationInterceptor` because Castle DynamicProxy can only intercept virtual members. Mark methods `virtual` or use the `IApplicationService` interface approach.
 </Warning>
 
-## AbpSettingOptions for Permissions
+## AbpPermissionOptions
 
 Extend `AbpPermissionOptions` (in the Authorization module) to add custom value providers or tweak provider ordering:
 

@@ -33,7 +33,7 @@ Versioning the re-packaged libraries under the `@abp` scope ensures that all ABP
     Top-level MVC pack. Provides the ABP global JavaScript runtime (`abp.js`) that handles client-side alerts, AJAX error handling, form validation hooks, and localization.
   </Card>
   <Card title="@abp/aspnetcore.mvc.ui.theme.shared" icon="palette">
-    Aggregates all shared theme dependencies: Bootstrap 5, Datatables BS5, Font Awesome, Select2, SweetAlert2, Luxon, Moment, Lodash, Timeago, and more.
+    Aggregates all shared theme dependencies: Bootstrap 5, Datatables BS5, Font Awesome, Select2, SweetAlert2, Luxon, Moment, Malihu Custom Scrollbar, Lodash, Timeago, and more.
   </Card>
   <Card title="@abp/core" icon="cube">
     Minimal runtime helpers (`@abp/utils` dependency). Used by non-theme MVC modules.
@@ -57,6 +57,8 @@ Versioning the re-packaged libraries under the `@abp` scope ensures that all ABP
     "@abp/jquery-validation-unobtrusive": "~10.5.0-rc.1",
     "@abp/lodash": "~10.5.0-rc.1",
     "@abp/luxon": "~10.5.0-rc.1",
+    "@abp/malihu-custom-scrollbar-plugin": "~10.5.0-rc.1",
+    "@abp/moment": "~10.5.0-rc.1",
     "@abp/select2": "~10.5.0-rc.1",
     "@abp/sweetalert2": "~10.5.0-rc.1",
     "@abp/timeago": "~10.5.0-rc.1"
@@ -89,10 +91,12 @@ Every third-party library is re-published under `@abp/<name>` so ABP can control
 <Accordion title="Full list of re-packaged libraries">
   | @abp pack | Original library |
   |---|---|
+  | `@abp/anchor-js` | `anchor-js` |
   | `@abp/bootstrap` | `bootstrap` |
   | `@abp/bootstrap-datepicker` | `bootstrap-datepicker` |
   | `@abp/bootstrap-daterangepicker` | `bootstrap-daterangepicker` |
   | `@abp/chart.js` | `chart.js` |
+  | `@abp/clipboard` | `clipboard` |
   | `@abp/codemirror` | `codemirror` |
   | `@abp/cropperjs` | `cropperjs` |
   | `@abp/datatables.net` | `datatables.net` |
@@ -227,7 +231,7 @@ The script:
 2. Runs `npm publish` for each pack in `npm/packs/`.
 3. Tags pre-releases with `--tag next` on the npm registry.
 
-Angular packages use a parallel `publish-ng.ps1` with a Gulp-based update step.
+Angular packages use a parallel `publish-ng.ps1` with version update and validation steps.
 
 ---
 

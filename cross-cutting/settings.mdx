@@ -154,8 +154,8 @@ public interface ISettingValueProvider
 Set `SettingDefinition.Providers` to limit which providers are consulted:
 
 ```csharp
-new SettingDefinition("Theme.Color",
-    providers: new[] { GlobalSettingValueProvider.ProviderName })
+new SettingDefinition("Theme.Color")
+    .WithProviders(GlobalSettingValueProvider.ProviderName)
 // Only the "G" (global) provider is consulted; user/tenant overrides are ignored.
 ```
 

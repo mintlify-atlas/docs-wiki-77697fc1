@@ -27,7 +27,7 @@ ABP provides a structured exception hierarchy so that every thrown exception car
 classDiagram
     direction TB
     Exception <|-- AbpException
-    AbpException <|-- BusinessException
+    Exception <|-- BusinessException
     BusinessException <|-- UserFriendlyException
     BusinessException <|-- EntityNotFoundException
     AbpException <|-- AbpAuthorizationException
@@ -68,7 +68,7 @@ classDiagram
 Use `BusinessException` for expected domain errors. The `Code` follows a reverse-DNS convention and is used for client-side mapping and localization:
 
 ```csharp
-public class BusinessException : AbpException, IHasErrorCode, IHasErrorDetails, IHasLogLevel
+public class BusinessException : Exception, IBusinessException, IHasErrorCode, IHasErrorDetails, IHasLogLevel
 {
     public string?   Code    { get; set; }
     public string?   Details { get; set; }
@@ -257,13 +257,13 @@ public class ElasticExceptionSubscriber : IExceptionSubscriber, ITransientDepend
 ```csharp
 Configure<AbpExceptionHandlingOptions>(options =>
 {
-    options.SendExceptionsDetailsToClients = false; // hide stack traces in production
-    options.SendStackTraceToClients        = false;
+    options.SendExceptionsDetailsToClients = false; // hide details in production
+    options.SendStackTraceToClients        = false; // default is true; explicitly disable in production
 });
 ```
 
 <Warning>
-Never set `SendExceptionsDetailsToClients = true` in production. Stack traces expose internal implementation details that can aid attackers.
+`SendExceptionsDetailsToClients` and `SendStackTraceToClients` should both be `false` in production. `SendStackTraceToClients` defaults to `true`, so explicitly set it to `false` before going live. Stack traces expose internal implementation details that can aid attackers.
 </Warning>
 
 ## Related Pages

@@ -66,18 +66,17 @@ graph TD
     MT[AbpMultiTenancyModule]
     EB[AbpEventBusModule]
     Loc[AbpLocalizationModule]
-    Core[Volo.Abp.Core]
+    Core["Volo.Abp.Core"]
 
     App -->|DependsOn| MVC
     MVC -->|DependsOn| DDD
     MVC -->|DependsOn| Loc
     DDD -->|DependsOn| Domain
-    Domain -->|DependsOn| UoW
-    Domain -->|DependsOn| Auth
+    DDD -->|DependsOn| Auth
     Auth -->|DependsOn| MT
     EF -->|DependsOn| Domain
     Domain -->|DependsOn| EB
-    EB -->|DependsOn| Core
+    EB -->|DependsOn| MT
     UoW -->|DependsOn| Core
     Loc -->|DependsOn| Core
 ```
@@ -139,7 +138,7 @@ Each interceptor is registered in its module's `ConfigureServices` and activated
 | Module dependency injection | All packages | `AbpModule`, `[DependsOn]` |
 | Repository | Domain layer | `IRepository<T, TKey>`, `EfCoreRepository<TDbContext, T, TKey>` |
 | Unit of Work | Transactional boundaries | `IUnitOfWork`, `IUnitOfWorkManager` |
-| Dynamic Proxy / Interceptor | Cross-cutting concerns | `AbpInterceptorBase`, `IAbpMethodInvocation` |
+| Dynamic Proxy / Interceptor | Cross-cutting concerns | `AbpInterceptor`, `IAbpMethodInvocation` |
 | Conventional Controllers | Auto-API generation | `AbpConventionalControllerFeatureProvider` |
 | Options Pattern | Configuration | `IOptions<T>`, `Configure<T>()`, `PreConfigure<T>()` |
 | Inbox/Outbox | Distributed events | `InboxProcessor`, `OutboxSender` |

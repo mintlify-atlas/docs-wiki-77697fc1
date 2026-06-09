@@ -172,12 +172,21 @@ await featureManager.SetAsync(
 
 ## Data seeding
 
-For development and test environments, seed an initial tenant using ABP's `IDataSeeder`:
+For development and test environments, seed an initial tenant using ABP's `IDataSeeder`. Use `ITenantRepository` for the existence check (the application service does not expose a `FindByName` query):
 
 ```csharp
 public class MyDataSeedContributor : IDataSeedContributor, ITransientDependency
 {
     private readonly ITenantAppService _tenantAppService;
+    private readonly ITenantRepository _tenantRepository;
+
+    public MyDataSeedContributor(
+        ITenantAppService tenantAppService,
+        ITenantRepository tenantRepository)
+    {
+        _tenantAppService = tenantAppService;
+        _tenantRepository = tenantRepository;
+    }
 
     public async Task SeedAsync(DataSeedContext context)
     {
@@ -185,7 +194,7 @@ public class MyDataSeedContributor : IDataSeedContributor, ITransientDependency
         if (context.TenantId != null)
             return;
 
-        var existing = await _tenantAppService.FindByNameAsync("acme");
+        var existing = await _tenantRepository.FindByNameAsync("acme");
         if (existing == null)
         {
             await _tenantAppService.CreateAsync(new TenantCreateDto

@@ -35,9 +35,10 @@ public static IConfigurationRoot BuildConfiguration(
 
     // appsettings.{Environment}.json
     if (!options.EnvironmentName.IsNullOrEmpty())
-        builder.AddJsonFile(
+        builder = builder.AddJsonFile(
             $"{options.FileName}.{options.EnvironmentName}.json",
-            optional: true);
+            optional: true,
+            reloadOnChange: options.ReloadOnChange);
 
     // User secrets (Development only)
     if (options.EnvironmentName == "Development")

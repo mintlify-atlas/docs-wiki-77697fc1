@@ -127,9 +127,9 @@ public abstract class BasicRepositoryBase<TEntity> :
 }
 ```
 
-### `RepositoryBase<TEntity, TKey>`
+### `RepositoryBase<TEntity>`
 
-Extends `BasicRepositoryBase` and implements the `IQueryable`-based members. It also applies data filters automatically:
+Extends `BasicRepositoryBase<TEntity>` and implements the `IQueryable`-based members. It also applies data filters automatically. `RepositoryBase<TEntity, TKey>` further extends this class to implement keyed lookup operations.
 
 ```csharp
 protected virtual TQueryable ApplyDataFilters<TQueryable>(TQueryable query)
